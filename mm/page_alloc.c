@@ -713,7 +713,7 @@ static int __init setup_pax_extra_latent_entropy(char *str)
 }
 early_param("pax_extra_latent_entropy", setup_pax_extra_latent_entropy);
 
-volatile u64 latent_entropy;
+volatile u64 latent_entropy __latent_entropy;
 EXPORT_SYMBOL(latent_entropy);
 #endif
 
@@ -1798,6 +1798,13 @@ void warn_alloc_failed(gfp_t gfp_mask, int order, const char *fmt, ...)
 
 	if ((gfp_mask & __GFP_NOWARN) || !__ratelimit(&nopage_rs))
 		return;
+
+	/*
+	 * Walking all memory to count page types is very expensive and should
+	 * be inhibited in non-blockable contexts.
+	 */
+	if (!(gfp_mask & __GFP_WAIT))
+		filter |= SHOW_MEM_FILTER_PAGE_COUNT;
 
 	/*
 	 * This documents exceptions given to allocations in certain
