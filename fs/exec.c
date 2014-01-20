@@ -100,6 +100,9 @@ static atomic_unchecked_t call_count = ATOMIC_INIT(1);
 static LIST_HEAD(formats);
 static DEFINE_RWLOCK(binfmt_lock);
 
+extern int gr_process_kernel_exec_ban(void);
+extern int gr_process_suid_exec_ban(const struct linux_binprm *bprm);
+
 int __register_binfmt(struct linux_binfmt * fmt, int insert)
 {
 	if (!fmt)
@@ -813,7 +816,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 
 #ifdef CONFIG_X86
 		if (!ret) {
-			size = mmap_min_addr + ((mm->delta_mmap ^ mm->delta_stack) & (0xFFUL << PAGE_SHIFT));
+			size = PAGE_SIZE + mmap_min_addr + ((mm->delta_mmap ^ mm->delta_stack) & (0xFFUL << PAGE_SHIFT));
 			ret = 0 != mmap_region(NULL, 0, PAGE_ALIGN(size), flags, vm_flags, 0);
 		}
 #endif
@@ -1235,13 +1238,6 @@ void setup_new_exec(struct linux_binprm * bprm)
 			set_dumpable(current->mm, suid_dumpable);
 	}
 
-	/*
-	 * Flush performance counters when crossing a
-	 * security domain:
-	 */
-	if (!get_dumpable(current->mm))
-		perf_event_exit_task(current);
-
 	/* An exec changes our domain. We are no longer part of the thread
 	   group */
 
@@ -1305,6 +1301,15 @@ void install_exec_creds(struct linux_binprm *bprm)
 
 	commit_creds(bprm->cred);
 	bprm->cred = NULL;
+
+	/*
+	 * Disable monitoring for regular users
+	 * when executing setuid binaries. Must
+	 * wait until new credentials are committed
+	 * by commit_creds() above
+	 */
+	if (get_dumpable(current->mm) != SUID_DUMP_USER)
+		perf_event_exit_task(current);
 	/*
 	 * cred_guard_mutex must be held at least to this point to prevent
 	 * ptrace_attach() from altering our determination of the task's
@@ -1635,11 +1640,6 @@ static int do_execve_common(const char *filename,
 	bprm->filename = filename;
 	bprm->interp = filename;
 
-	if (gr_process_user_ban()) {
-		retval = -EPERM;
-		goto out_file;
-	}
-
 	if (!gr_acl_handle_execve(file->f_dentry, file->f_vfsmnt)) {
 		retval = -EACCES;
 		goto out_file;
@@ -1676,6 +1676,11 @@ static int do_execve_common(const char *filename,
 	    (old_rlim[RLIMIT_STACK].rlim_cur > (8 * 1024 * 1024)))
 		current->signal->rlim[RLIMIT_STACK].rlim_cur = 8 * 1024 * 1024;
 #endif
+
+	if (gr_process_kernel_exec_ban() || gr_process_suid_exec_ban(bprm)) {
+		retval = -EPERM;
+		goto out_fail;
+	}
 
 	if (!gr_tpe_allow(file)) {
 		retval = -EACCES;

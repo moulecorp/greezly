@@ -312,9 +312,9 @@ ENTRY(pax_enter_kernel_user)
 	sub phys_base(%rip),%rbx
 
 #ifdef CONFIG_PARAVIRT
-	pushq %rdi
 	cmpl $0, pv_info+PARAVIRT_enabled
 	jz 1f
+	pushq %rdi
 	i = 0
 	.rept USER_PGD_PTRS
 	mov i*8(%rbx),%rsi
@@ -323,6 +323,7 @@ ENTRY(pax_enter_kernel_user)
 	call PARA_INDIRECT(pv_mmu_ops+PV_MMU_set_pgd_batched)
 	i = i + 1
 	.endr
+	popq %rdi
 	jmp 2f
 1:
 #endif
@@ -334,7 +335,7 @@ ENTRY(pax_enter_kernel_user)
 	.endr
 
 #ifdef CONFIG_PARAVIRT
-2:	popq %rdi
+2:
 #endif
 	SET_RDI_INTO_CR3
 
@@ -375,7 +376,6 @@ ENTRY(pax_exit_kernel_user)
 	sub phys_base(%rip),%rbx
 
 #ifdef CONFIG_PARAVIRT
-	pushq %rdi
 	cmpl $0, pv_info+PARAVIRT_enabled
 	jz 1f
 	i = 0
@@ -386,8 +386,6 @@ ENTRY(pax_exit_kernel_user)
 	call PARA_INDIRECT(pv_mmu_ops+PV_MMU_set_pgd_batched)
 	i = i + 1
 	.endr
-	popq %rdi
-	PV_RESTORE_REGS(CLBR_RDI)
 	jmp 2f
 1:
 #endif
@@ -399,7 +397,7 @@ ENTRY(pax_exit_kernel_user)
 	.endr
 
 #ifdef CONFIG_PARAVIRT
-2:
+2:	PV_RESTORE_REGS(CLBR_RDI)
 #endif
 
 	popq %rbx
@@ -410,30 +408,6 @@ ENTRY(pax_exit_kernel_user)
 	jmp 3b
 ENDPROC(pax_exit_kernel_user)
 #endif
-
-	.macro pax_enter_kernel_nmi
-	pax_set_fptr_mask
-
-#ifdef CONFIG_PAX_KERNEXEC
-	GET_CR0_INTO_RDI
-	bts $16,%rdi
-	SET_RDI_INTO_CR0
-	jc 110f
-	or $2,%ebx
-110:
-#endif
-	.endm
-
-	.macro pax_exit_kernel_nmi
-#ifdef CONFIG_PAX_KERNEXEC
-	test $2,%ebx
-	jz 110f
-	GET_CR0_INTO_RDI
-	btr $16,%rdi
-	SET_RDI_INTO_CR0
-110:
-#endif
-	.endm
 
 .macro pax_erase_kstack
 #ifdef CONFIG_PAX_MEMORY_STACKLEAK
@@ -1908,7 +1882,16 @@ ENTRY(nmi)
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-R15
 	call save_paranoid
 	DEFAULT_FRAME 0
-	pax_enter_kernel_nmi
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	testb $3, CS(%rsp)
+	jnz 1f
+	pax_enter_kernel
+	jmp 2f
+1:	pax_enter_kernel_user
+2:
+#else
+	pax_enter_kernel
+#endif
 
 	/* paranoidentry do_nmi, 0; without TRACE_IRQS_OFF */
 	movq %rsp,%rdi
@@ -1918,19 +1901,31 @@ ENTRY(nmi)
 	/* paranoidexit; without TRACE_IRQS_OFF */
 	/* ebx:	no swapgs flag */
 	DISABLE_INTERRUPTS(CLBR_NONE)
-	testl $1,%ebx				/* swapgs needed? */
+	testl %ebx,%ebx				/* swapgs needed? */
 	jnz nmi_restore
-	testl $3,CS(%rsp)
+	testb $3,CS(%rsp)
 	jnz nmi_userspace
-nmi_swapgs:
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	pax_exit_kernel
 	SWAPGS_UNSAFE_STACK
-nmi_restore:
-	pax_exit_kernel_nmi
 	RESTORE_ALL 8
-	testb $3, 8(%rsp)
-	jnz 1f
 	pax_force_retaddr_bts
-1:	jmp irq_return
+	jmp irq_return
+#endif
+nmi_swapgs:
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	pax_exit_kernel_user
+#else
+	pax_exit_kernel
+#endif
+	SWAPGS_UNSAFE_STACK
+	RESTORE_ALL 8
+	jmp irq_return
+nmi_restore:
+	pax_exit_kernel
+	RESTORE_ALL 8
+	pax_force_retaddr_bts
+	jmp irq_return
 nmi_userspace:
 	GET_THREAD_INFO(%rcx)
 	movl TI_flags(%rcx),%ebx

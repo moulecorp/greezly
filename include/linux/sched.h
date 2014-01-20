@@ -397,7 +397,7 @@ static inline unsigned long gr_rand_threadstack_offset(const struct mm_struct *m
 }
 #endif
 
-extern bool check_heap_stack_gap(const struct vm_area_struct *vma, unsigned long addr, unsigned long len, unsigned long offset);
+extern bool check_heap_stack_gap(const struct vm_area_struct *vma, unsigned long *addr, unsigned long len, unsigned long offset);
 extern unsigned long skip_heap_stack_gap(const struct vm_area_struct *vma, unsigned long len, unsigned long offset);
 extern void arch_pick_mmap_layout(struct mm_struct *mm);
 extern unsigned long
@@ -741,9 +741,12 @@ struct user_struct {
 	struct key *session_keyring;	/* UID's default session keyring */
 #endif
 
-#if defined(CONFIG_GRKERNSEC_KERN_LOCKOUT) || defined(CONFIG_GRKERNSEC_BRUTE)
-	unsigned int banned;
-	unsigned long ban_expires;
+#ifdef CONFIG_GRKERNSEC_KERN_LOCKOUT
+	unsigned char kernel_banned;
+#endif
+#ifdef CONFIG_GRKERNSEC_BRUTE
+	unsigned char suid_banned;
+	unsigned long suid_ban_expires;
 #endif
 
 	/* Hash table maintenance information */

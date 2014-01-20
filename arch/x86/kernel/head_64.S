@@ -108,7 +108,6 @@ startup_64:
 	addq	%rbp, level3_kernel_pgt + (L3_START_KERNEL*8)(%rip)
 	addq	%rbp, level3_kernel_pgt + (L3_START_KERNEL*8+8)(%rip)
 
-	addq	%rbp, level2_fixmap_pgt + (506*8)(%rip)
 	addq	%rbp, level2_fixmap_pgt + (507*8)(%rip)
 
 	/*
@@ -479,7 +478,6 @@ ENTRY(phys_base)
 ENTRY(idt_table)
 	.fill 512,8,0
 
-	__PAGE_ALIGNED_BSS
 	.align PAGE_SIZE
 ENTRY(empty_zero_page)
 	.skip PAGE_SIZE
