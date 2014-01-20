@@ -714,6 +714,7 @@ static int __init setup_pax_extra_latent_entropy(char *str)
 early_param("pax_extra_latent_entropy", setup_pax_extra_latent_entropy);
 
 volatile u64 latent_entropy;
+EXPORT_SYMBOL(latent_entropy);
 #endif
 
 /*
@@ -5816,6 +5817,10 @@ __offline_isolated_pages(unsigned long start_pfn, unsigned long end_pfn)
 		zone->free_area[order].nr_free--;
 		__mod_zone_page_state(zone, NR_FREE_PAGES,
 				      - (1UL << order));
+#ifdef CONFIG_HIGHMEM
+		if (PageHighMem(page))
+			totalhigh_pages -= 1 << order;
+#endif
 		for (i = 0; i < (1 << order); i++)
 			SetPageReserved((page+i));
 		pfn += (1 << order);
