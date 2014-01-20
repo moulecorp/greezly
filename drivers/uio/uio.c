@@ -660,7 +660,10 @@ static int uio_mmap_physical(struct vm_area_struct *vma)
 		return -EINVAL;
 	mem = idev->info->mem + mi;
 
-	vma->vm_flags |= VM_IO | VM_RESERVED;
+	if (mem->addr & ~PAGE_MASK)
+		return -ENODEV;
+	if (vma->vm_end - vma->vm_start > mem->size)
+		return -EINVAL;
 
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
