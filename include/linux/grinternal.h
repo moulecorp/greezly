@@ -46,6 +46,7 @@ extern int grsec_enable_audit_ptrace;
 extern int grsec_enable_forkfail;
 extern int grsec_enable_time;
 extern int grsec_enable_rofs;
+extern int grsec_deny_new_usb;
 extern int grsec_enable_chroot_shmat;
 extern int grsec_enable_chroot_mount;
 extern int grsec_enable_chroot_double;
@@ -73,7 +74,6 @@ extern int grsec_enable_socket_server;
 extern int grsec_socket_server_gid;
 extern int grsec_audit_gid;
 extern int grsec_enable_group;
-extern int grsec_enable_audit_textrel;
 extern int grsec_enable_log_rwxmaps;
 extern int grsec_enable_mount;
 extern int grsec_enable_chdir;
@@ -189,7 +189,8 @@ enum {
 	GR_CRASH1,
 	GR_CRASH2,
 	GR_PSACCT,
-	GR_RWXMAP
+	GR_RWXMAP,
+	GR_RWXMAPVMA
 };
 
 #define gr_log_hidden_sysctl(audit, msg, str) gr_log_varargs(audit, msg, GR_SYSCTL_HIDDEN, str)
@@ -227,6 +228,7 @@ enum {
 #define gr_log_crash2(audit, msg, task, ulong1) gr_log_varargs(audit, msg, GR_CRASH2, task, ulong1)
 #define gr_log_procacct(audit, msg, task, num1, num2, num3, num4, num5, num6, num7, num8, num9) gr_log_varargs(audit, msg, GR_PSACCT, task, num1, num2, num3, num4, num5, num6, num7, num8, num9)
 #define gr_log_rwxmap(audit, msg, str) gr_log_varargs(audit, msg, GR_RWXMAP, str)
+#define gr_log_rwxmap_vma(audit, msg, str) gr_log_varargs(audit, msg, GR_RWXMAPVMA, str)
 
 void gr_log_varargs(int audit, const char *msg, int argtypes, ...);
 

@@ -21,12 +21,12 @@ int grsec_enable_signal;
 int grsec_enable_forkfail;
 int grsec_enable_audit_ptrace;
 int grsec_enable_time;
-int grsec_enable_audit_textrel;
 int grsec_enable_group;
 int grsec_audit_gid;
 int grsec_enable_chdir;
 int grsec_enable_mount;
 int grsec_enable_rofs;
+int grsec_deny_new_usb;
 int grsec_enable_chroot_findtask;
 int grsec_enable_chroot_mount;
 int grsec_enable_chroot_shmat;
@@ -153,9 +153,6 @@ grsecurity_init(void)
 	grsec_lock = 1;
 #endif
 
-#ifdef CONFIG_GRKERNSEC_AUDIT_TEXTREL
-	grsec_enable_audit_textrel = 1;
-#endif
 #ifdef CONFIG_GRKERNSEC_RWXMAP_LOG
 	grsec_enable_log_rwxmaps = 1;
 #endif
@@ -277,6 +274,9 @@ grsecurity_init(void)
 	grsec_enable_socket_server = 1;
 	grsec_socket_server_gid = CONFIG_GRKERNSEC_SOCKET_SERVER_GID;
 #endif
+#endif
+#ifdef CONFIG_GRKERNSEC_DENYUSB_FORCE
+	grsec_deny_new_usb = 1;
 #endif
 
 	return;

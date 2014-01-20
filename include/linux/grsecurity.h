@@ -19,6 +19,8 @@
 #error "CONFIG_PAX enabled, but no PaX options are enabled."
 #endif
 
+int gr_handle_new_usb(void);
+
 void gr_handle_brute_attach(unsigned long mm_flags);
 void gr_handle_brute_check(void);
 void gr_handle_kernel_exploit(void);
@@ -75,8 +77,9 @@ void gr_log_remount(const char *devname, const int retval);
 void gr_log_unmount(const char *devname, const int retval);
 void gr_log_mount(const char *from, const char *to, const int retval);
 void gr_log_textrel(struct vm_area_struct *vma);
+void gr_log_ptgnustack(struct file *file);
 void gr_log_rwxmmap(struct file *file);
-void gr_log_rwxmprotect(struct file *file);
+void gr_log_rwxmprotect(struct vm_area_struct *vma);
 
 int gr_handle_follow_link(const struct inode *parent,
 				 const struct inode *inode,
