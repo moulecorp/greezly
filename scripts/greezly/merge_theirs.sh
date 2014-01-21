@@ -3,6 +3,8 @@
 from=$1
 to=$2
 
+cd $(git rev-parse --show-toplevel)
+
 git checkout $1
 git merge -s ours --no-edit $2
 git branch tmpMerge
