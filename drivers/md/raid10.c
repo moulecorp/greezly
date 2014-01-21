@@ -997,7 +997,7 @@ read_again:
 			/* Could not read all from this device, so we will
 			 * need another r10_bio.
 			 */
-			sectors_handled = (r10_bio->sectors + max_sectors
+			sectors_handled = (r10_bio->sector + max_sectors
 					   - bio->bi_sector);
 			r10_bio->sectors = max_sectors;
 			spin_lock_irq(&conf->device_lock);
@@ -1005,7 +1005,7 @@ read_again:
 				bio->bi_phys_segments = 2;
 			else
 				bio->bi_phys_segments++;
-			spin_unlock(&conf->device_lock);
+			spin_unlock_irq(&conf->device_lock);
 			/* Cannot call generic_make_request directly
 			 * as that will be queued in __generic_make_request
 			 * and subsequent mempool_alloc might block
@@ -1465,7 +1465,7 @@ static void end_sync_read(struct bio *bio, int error)
 		/* The write handler will notice the lack of
 		 * R10BIO_Uptodate and record any errors etc
 		 */
-		atomic_add(r10_bio->sectors,
+		atomic_add_unchecked(r10_bio->sectors,
 			   &conf->mirrors[d].rdev->corrected_errors);
 
 	/* for reconstruct, we always reschedule after a read.
@@ -1765,7 +1765,7 @@ static void check_decay_read_errors(struct mddev *mddev, struct md_rdev *rdev)
 {
 	struct timespec cur_time_mon;
 	unsigned long hours_since_last;
-	unsigned int read_errors = atomic_read(&rdev->read_errors);
+	unsigned int read_errors = atomic_read_unchecked(&rdev->read_errors);
 
 	ktime_get_ts(&cur_time_mon);
 
@@ -1787,9 +1787,9 @@ static void check_decay_read_errors(struct mddev *mddev, struct md_rdev *rdev)
 	 * overflowing the shift of read_errors by hours_since_last.
 	 */
 	if (hours_since_last >= 8 * sizeof(read_errors))
-		atomic_set(&rdev->read_errors, 0);
+		atomic_set_unchecked(&rdev->read_errors, 0);
 	else
-		atomic_set(&rdev->read_errors, read_errors >> hours_since_last);
+		atomic_set_unchecked(&rdev->read_errors, read_errors >> hours_since_last);
 }
 
 static int r10_sync_page_io(struct md_rdev *rdev, sector_t sector,
@@ -1839,8 +1839,8 @@ static void fix_read_error(struct r10conf *conf, struct mddev *mddev, struct r10
 		return;
 
 	check_decay_read_errors(mddev, rdev);
-	atomic_inc(&rdev->read_errors);
-	if (atomic_read(&rdev->read_errors) > max_read_errors) {
+	atomic_inc_unchecked(&rdev->read_errors);
+	if (atomic_read_unchecked(&rdev->read_errors) > max_read_errors) {
 		char b[BDEVNAME_SIZE];
 		bdevname(rdev->bdev, b);
 
@@ -1848,7 +1848,7 @@ static void fix_read_error(struct r10conf *conf, struct mddev *mddev, struct r10
 		       "md/raid10:%s: %s: Raid device exceeded "
 		       "read_error threshold [cur %d:max %d]\n",
 		       mdname(mddev), b,
-		       atomic_read(&rdev->read_errors), max_read_errors);
+		       atomic_read_unchecked(&rdev->read_errors), max_read_errors);
 		printk(KERN_NOTICE
 		       "md/raid10:%s: %s: Failing raid device\n",
 		       mdname(mddev), b);
@@ -1993,7 +1993,7 @@ static void fix_read_error(struct r10conf *conf, struct mddev *mddev, struct r10
 				       (unsigned long long)(
 					       sect + rdev->data_offset),
 				       bdevname(rdev->bdev, b));
-				atomic_add(s, &rdev->corrected_errors);
+				atomic_add_unchecked(s, &rdev->corrected_errors);
 			}
 
 			rdev_dec_pending(rdev, mddev);
@@ -2563,10 +2563,6 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr,
 			if (j == conf->copies) {
 				/* Cannot recover, so abort the recovery or
 				 * record a bad block */
-				put_buf(r10_bio);
-				if (rb2)
-					atomic_dec(&rb2->remaining);
-				r10_bio = rb2;
 				if (any_working) {
 					/* problem is that there are bad blocks
 					 * on other device(s)
@@ -2590,6 +2586,10 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr,
 					conf->mirrors[i].recovery_disabled
 						= mddev->recovery_disabled;
 				}
+				put_buf(r10_bio);
+				if (rb2)
+					atomic_dec(&rb2->remaining);
+				r10_bio = rb2;
 				break;
 			}
 		}
