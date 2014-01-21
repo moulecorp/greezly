@@ -422,6 +422,10 @@ extern int get_dumpable(struct mm_struct *mm);
 #define SUID_DUMPABLE_ENABLED	1
 #define SUID_DUMPABLE_SAFE	2
 
+#define SUID_DUMP_DISABLE	0	/* No setuid dumping */
+#define SUID_DUMP_USER		1	/* Dump as user of process */
+#define SUID_DUMP_ROOT		2	/* Dump as root */
+
 /* mm flags */
 /* dumpable bits */
 #define MMF_DUMPABLE      0  /* core dump is permitted */
@@ -1660,6 +1664,7 @@ extern int pax_softmode;
 #endif
 
 extern int pax_check_flags(unsigned long *);
+#define PAX_PARSE_FLAGS_FALLBACK	(~0UL)
 
 /* if tsk != current then task_lock must be held on it */
 #if defined(CONFIG_PAX_NOEXEC) || defined(CONFIG_PAX_ASLR)

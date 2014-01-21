@@ -310,7 +310,6 @@ config PAX_XATTR_PAX_FLAGS
 	select CIFS_XATTR if CIFS
 	select EXT2_FS_XATTR if EXT2_FS
 	select EXT3_FS_XATTR if EXT3_FS
-	select EXT4_FS_XATTR if EXT4_FS
 	select JFFS2_FS_XATTR if JFFS2_FS
 	select REISERFS_FS_XATTR if REISERFS_FS
 	select SQUASHFS_XATTR if SQUASHFS
@@ -734,7 +733,6 @@ menu "Miscellaneous hardening features"
 config PAX_MEMORY_SANITIZE
 	bool "Sanitize all freed memory"
 	default y if (GRKERNSEC_CONFIG_AUTO && GRKERNSEC_CONFIG_PRIORITY_SECURITY)
-	depends on !HIBERNATION
 	help
 	  By saying Y here the kernel will erase memory pages and slab objects
 	  as soon as they are freed.  This in turn reduces the lifetime of data
