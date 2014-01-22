@@ -1,7 +1,7 @@
 #!/bin/bash
 
-kv=$1
-gv=$2
+gv=$1
+kv=$2
 timestamp=$3
 
 clean() {
