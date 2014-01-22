@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Copyright (C) 2014, Antoine Tenart <atenart@n0.pe>
+
 gv=$1
 kv=$2
 timestamp=$3

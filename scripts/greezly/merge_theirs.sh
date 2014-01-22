@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Copyright (C) 2014, Antoine Tenart <atenart@n0.pe>
+
 from=$1
 to=$2
 
