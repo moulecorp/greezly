@@ -33,7 +33,7 @@ if [ $? -ne 0 ]; then
 fi
 
 ref_tag=$(git rev-parse v${kv}~0)
-if [ $(git branch greezly --contains $ref_tag) -ge 0 ]; then
+if [ $(git branch greezly --contains $ref_tag | wc -l) -ge 1 ]; then
 	git checkout v$kv
 	git apply ../grsecurity-$gv-$kv-$timestamp.patch
 	git add -A
