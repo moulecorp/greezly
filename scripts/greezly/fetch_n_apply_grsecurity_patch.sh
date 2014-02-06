@@ -37,7 +37,7 @@ if [ $(git branch greezly --contains $ref_tag | wc -l) -ge 1 ]; then
 	git checkout v$kv
 	git apply ../grsecurity-$gv-$kv-$timestamp.patch
 	git add -A
-	git diff greezly --name-only | grep -v '^scripts/greezly' | xargs git diff greezly -- > tmpPatch.diff
+	git diff greezly --name-only | grep -v '^scripts/greezly\|greezly_defconfig$' | xargs git diff greezly -- > tmpPatch.diff
 	git reset --hard
 
 	git checkout greezly
