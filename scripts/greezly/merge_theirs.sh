@@ -12,6 +12,6 @@ git merge -s ours --no-edit $2
 git branch tmpMerge
 git reset --hard $2
 git reset --soft tmpMerge
-git checkout $1 scripts/greezly
+git checkout $1 scripts/greezly arch/x86/configs/x86_64_greezly_defconfig
 git commit --amend --no-edit
 git branch -D tmpMerge
