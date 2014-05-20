@@ -1,0 +1,285 @@
+#!/bin/bash
+
+if [ $(id -u) -ne 0 ]; then
+	echo "Run this script as root or with fakeroot"
+	exit -1
+fi
+
+pv=$(git tag --points-at HEAD | grep -o '[0-9]*')
+urg=$URGENCY
+OUT_OF_TREE=0
+
+if [[ -z "$pv" || -z "$urg" ]]; then
+	OUT_OF_TREE=1
+elif [[ $pv -gt 1 ]]; then
+	pv_p=$(expr $pv - 1)
+else
+	pv_p=$pv
+fi
+
+if [ -z "$MAINTAINER" ]; then
+	MAINTAINER="Anonymous <$(id -nu)@$(hostname -f)>"
+fi
+
+
+kv=$(make kernelversion)
+if [ ! -e ".config" ]; then
+	make x86_64_greezly_defconfig
+fi
+
+workdir="$objtree/debian/tmp"
+imgdir="$workdir/img"
+hdir="$workdir/headers"
+srcdir="$workdir/src"
+meta_imgdir="$workdir/meta_img"
+meta_hdir="$workdir/meta_headers"
+meta_srcdir="$workdir/meta_src"
+
+mkdir -m 755 -p "$workdir"
+mkdir -m 755 -p "$imgdir/boot"
+mkdir -m 755 -p "$imgdir/usr/share/doc/linux-image-$kv-grsec-amd64"
+mkdir -m 755 -p "$imgdir/usr/share/linux-image-$kv-grsec-amd64"
+mkdir -m 755 -p "$imgdir/lib/modules/$kv-grsec-amd64"
+mkdir -m 755 -p "$imgdir/DEBIAN"
+mkdir -m 755 -p "$hdir/usr/share/doc/linux-headers-$kv-grsec-amd64"
+mkdir -m 755 -p "$hdir/usr/src/linux-headers-$kv-grsec-amd64"
+mkdir -m 755 -p "$hdir/DEBIAN"
+mkdir -m 755 -p "$srcdir/usr/src"
+mkdir -m 755 -p "$srcdir/usr/share/doc/linux-source-$kv-grsec"
+mkdir -m 755 -p "$srcdir/DEBIAN"
+mkdir -m 755 -p "$meta_imgdir/usr/share/doc/linux-image-grsec-amd64"
+mkdir -m 755 -p "$meta_imgdir/DEBIAN"
+mkdir -m 755 -p "$meta_hdir/usr/share/doc/linux-headers-grsec-amd64"
+mkdir -m 755 -p "$meta_hdir/DEBIAN"
+mkdir -m 755 -p "$meta_srcdir/usr/share/doc/linux-source-grsec"
+mkdir -m 755 -p "$meta_srcdir/DEBIAN"
+
+if [[ $OUT_OF_TREE -eq 0 ]]; then
+	export KBUILD_BUILD_VERSION=$pv
+	# Do not append '+' to the kernel version
+	export LOCALVERSION=""
+else
+	pv=$KERNELRELEASE
+	urg="low"
+fi
+export KBUILD_BUILD_USER="marvin"
+export KBUILD_BUILD_HOST="Heart_of_Gold"
+
+mk_pkg () {
+	local pkg_name=$1 pkg_dir=$2
+
+	cp debian/changelog $pkg_dir/usr/share/doc/$pkg_name/changelog.Debian
+	gzip -9 $pkg_dir/usr/share/doc/$pkg_name/changelog.Debian
+
+	cp COPYING $pkg_dir/usr/share/doc/$pkg_name/copyright
+
+	sh -c "cd '$pkg_dir'; find . -type f ! -path './DEBIAN/*' -printf '%P\0' \
+		| xargs -r0 md5sum > DEBIAN/md5sums"
+
+	chown -R root:root "$pkg_dir"
+	chmod -R go-w "$pkg_dir"
+
+	dpkg-gencontrol -isp -p$pkg_name -P"$pkg_dir"
+	dpkg --build "$pkg_dir" ..
+}
+
+echo -e "linux-grsec ($pv) greezly; urgency=$urg\n" > "tmpchangelog"
+if [[ $OUT_OF_TREE -eq 0 ]]; then
+	git log --pretty="  * %s" greezly-v$pv_p..greezly-v$pv >> "tmpchangelog"
+else
+	echo -e "  * Custom built greezly kernel.\n" >> "tmpchangelog"
+fi
+
+echo -e "\n -- $MAINTAINER  $(date -R)\n" >> "tmpchangelog"
+if [ -n "$CHANGELOG" ]; then
+	cat "$CHANGELOG" >> "tmpchangelog"
+fi
+mv "tmpchangelog" "debian/changelog"
+
+for script in postinst postrm preinst prerm; do
+	mkdir -p "$imgdir/etc/kernel/$script.d"
+	cat <<EOF > $imgdir/DEBIAN/$script
+#!/bin/bash
+set -e
+export DEB_MAINT_PARAMS="\$*"
+test -d /etc/kernel/$script.d && run-parts --arg="$kv-grsec-amd64" \
+		/etc/kernel/$script.d
+EOF
+	if [[ $script == "postinst" ]]; then
+		cat <<EOF >> $imgdir/DEBIAN/$script
+groups=\$(cut -d: -f1 /etc/group)
+gids=\$(cut -d: -f3 /etc/group)
+check_n_create () {
+	if [[ ! \$groups =~ \$1 ]] && [[ ! \$gids =~ \$2 ]]; then
+		groupadd --gid \$2 \$1
+		echo "Add group \$1 (\$2)"
+	fi
+}
+check_n_create "gr_tpe_trusted" 666
+check_n_create "gr_view_proc" 667
+check_n_create "gr_nosoc_srv" 668
+check_n_create "gr_nosoc_cli" 669
+check_n_create "gr_nosoc_all" 670
+check_n_create "gr_audit" 671
+
+echo ""
+echo "WARNING: some programs need PaX flags to be set in order to work"
+echo "on this grsec kernel. Like grub2."
+echo "You can set the required flags by running:"
+echo "/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh"
+echo ""
+
+if [ -d /etc/sysctl.d ]; then
+	if [ ! -f /etc/sysctl.d/grsecurity.conf ]; then
+		echo "# grsecurity sysctl configuration file" > \
+			/etc/sysctl.d/grsecurity.conf
+		echo "" >> /etc/sysctl.d/grsecurity.conf
+		echo "# Lock grsecurity sysctl values until next boot" >> \
+			/etc/sysctl.d/grsecurity.conf
+		echo "# This _must_ be the last statement" >> \
+			/etc/sysctl.d/grsecurity.conf
+		echo "kernel.grsecurity.grsec_lock=1" >> \
+			/etc/sysctl.d/grsecurity.conf
+	fi
+else
+	echo "ERROR: can't find /etc/sysctl.d/ ! You _need_ to manually"
+	echo "set kernel.grsecurity.grsec_lock to 1 after boot."
+	echo "This is a security issue."
+	echo ""
+fi
+EOF
+	elif [[ $script == "postrm" ]]; then
+		cat <<EOF >> $imgdir/DEBIAN/$script
+if [[ \$(ls /boot | grep "grsec") -ne 0 ]] && \
+		[ -f /etc/sysctl.d/grsecurity.conf ]; then
+	rm -f /etc/sysctl.d/grsecurity.conf
+fi
+EOF
+	fi
+	echo "exit 0" >> "$imgdir/DEBIAN/$script"
+	chmod 755 "$imgdir/DEBIAN/$script"
+done
+cat <<EOF > debian/control
+Source: linux-grsec
+Priority: optional
+maintainer: $MAINTAINER
+Standards-version: 3.9.2
+Homepage: http://mirrors.n0.pe
+
+Package: linux-image-$kv-grsec-amd64
+Section: kernel
+Provides: linux-image, linux-image-2.6, linux-modules-$kv
+Suggests: gradm, paxctl
+Architecture: amd64
+Description: Linux kernel binary image patched with grsecurity
+ Linux kernel image, version $kv.
+ .
+ This kernel is patched with grsecurity/PAX and is suitable for all
+ "home servers", both for services and routing.
+ .
+ Support for virtualization (Xen, KVM) as host and guest is included.
+ Dynamic Kernel Module Support is present.
+
+Package: linux-headers-$kv-grsec-amd64
+Section: kernel
+Provides: linux-headers
+Architecture: all
+Description: Header files for linux patched with grsec
+  Provides the linux hearders version $kv patched with grsecurity, generally
+  used for building out-of-tree kernel modules.
+
+Package: linux-source-$kv-grsec
+Section: kernel
+Provides: linux-source
+Suggests: libc6-dev | libc-dev, gcc, make
+Architecture: all
+Description: Linux kernel source for version $kv, patched with grsecurity
+  Provides the linux kernel source for version $kv, patched with grsecurity.
+  .
+  Can be used to build your own kernel and to review the kernel we provide.
+
+Package: linux-image-grsec-amd64
+Section: kernel
+Depends: linux-image-$kv-grsec-amd64
+Architecture: amd64
+Description: Linux kernel for 64 bit arch patched with grsecurity (meta-package)
+  This package depends on the latest Linux kernel and grsecurity patch available
+  in the repository, for 64 bit architectures.
+  .
+  This kernel is patched with grsecurity/PAX and is suitable for servers both
+  for services and routing.
+  .
+  It includes support for virtualization (Xen, KVM) as host and guest and has
+  Dynamic Kernel Module Support (DKMS).
+
+Package: linux-headers-grsec-amd64
+Section: kernel
+Depends: linux-headers-$kv-grsec-amd64
+Architecture: amd64
+Description: Header files for linux patched with grsec (meta-package)
+  Provides the latest linux-grsec headers, generally used for building
+  out-of-tree kernel modules.
+
+Package: linux-source-grsec
+Section: kernel
+Depends: linux-source-$kv-grsec
+Architecture: amd64
+Description: Latest linux kernel source, patched with grsecurity (meta-package)
+  Provides the latest linux kernel source, patched with grsecurity.
+  .
+  Can be used to build your own kernel and to review the kernel we provide.
+EOF
+
+cat <<EOF > $imgdir/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh
+#!/bin/bash
+set_pax_flags () {
+	if [ -f \$2 ]; then
+		read -r -p "Found \${2##*/} ! Do you want to apply flags +\$1 ? [Y/n] " choice
+		choice=\${choice,,}
+		choice=\${choice:=y}
+		if [[ \$choice =~ ^(yes|y) ]]; then
+			paxctl -c\$1 \$2 &> /dev/null
+			echo "Done."
+		fi
+	fi
+}
+if [[ \$(id -u) -ne 0 ]]; then
+	echo "Error: you must run this script as root"
+	exit -1
+fi
+if [ ! -f /sbin/paxctl ]; then
+	echo "Error: paxctl is not installed (apt-get install paxctl)"
+	exit -1
+fi
+set_pax_flags "pm" "/usr/sbin/grub-probe"
+set_pax_flags "pm" "/usr/bin/grub-script-check"
+set_pax_flags "m"  "/usr/sbin/slapd"
+set_pax_flags "p"  "/usr/sbin/grub-mkdevicemap"
+exit 0
+EOF
+chmod +x "$imgdir/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh"
+
+cp $KBUILD_IMAGE "$imgdir/boot/vmlinuz-$kv-grsec-amd64"
+if [[ $(grep -q '^CONFIG_MODULES=y' $KCONFIG_CONFIG) ]]; then
+	make modules_install INSTALL_MOD_PATH="$imgdir" KBUILD_SRC=
+	rm -f "$imgdir/lib/modules/$kv-grsec-amd64/build"
+	rm -f "$imgdir/lib/modules/$kv-grsec-amd64/source"
+fi
+mk_pkg "linux-image-$kv-grsec-amd64" "$imgdir"
+
+make headers_check
+make headers_install \
+	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$kv-grsec-amd64"
+mk_pkg "linux-headers-$kv-grsec-amd64" "$hdir"
+
+git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
+bzip2 -9 "$srcdir/usr/src/linux-source-$kv-grsec.tar"
+mk_pkg "linux-source-$kv-grsec" "$srcdir"
+
+mk_pkg "linux-image-grsec-amd64" "$meta_imgdir"
+mk_pkg "linux-headers-grsec-amd64" "$meta_hdir"
+mk_pkg "linux-source-grsec" "$meta_srcdir"
+
+rm -r "$workdir"
+
+exit 0

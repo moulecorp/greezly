@@ -1299,6 +1299,11 @@ package-dir	:= $(srctree)/scripts/package
 rpm: include/config/kernel.release FORCE
 	$(Q)$(MAKE) $(build)=$(package-dir) $@
 
+greezly-package-dir := $(srctree)/scripts/greezly/package
+
+greezly%: FORCE
+	$(Q)$(MAKE) $(build)=$(greezly-package-dir) $@
+
 
 # Brief documentation of the typical targets used
 # ---------------------------------------------------------------------------
@@ -1351,6 +1356,7 @@ help:
 	@echo  ''
 	@echo  'Kernel packaging:'
 	@$(MAKE) $(build)=$(package-dir) help
+	@$(MAKE) $(build)=$(greezly-package-dir) help
 	@echo  ''
 	@echo  'Documentation targets:'
 	@$(MAKE) -f $(srctree)/Documentation/DocBook/Makefile dochelp
