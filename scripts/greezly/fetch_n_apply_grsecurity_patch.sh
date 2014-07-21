@@ -5,6 +5,7 @@
 gv=$1
 kv=$2
 timestamp=$3
+base="${kv%.*}.$(expr ${kv##*.} - 1)"
 
 clean() {
 	rm ../grsecurity-$gv-$kv-$timestamp.patch
@@ -35,6 +36,7 @@ if [ $? -ne 0 ]; then
 fi
 
 ref_tag=$(git rev-parse v${kv}~0)
+from=$(git rev-parse HEAD)
 if [ $(git branch greezly --contains $ref_tag | wc -l) -ge 1 ]; then
 	git checkout v$kv
 	git apply ../grsecurity-$gv-$kv-$timestamp.patch
@@ -46,6 +48,9 @@ if [ $(git branch greezly --contains $ref_tag | wc -l) -ge 1 ]; then
 	git apply tmpPatch.diff
 	rm tmpPatch.diff
 	commit
+
+	./scripts/greezly/keep_ours.sh v$kv $from greezly
+	git commit --amend --no-edit
 else
 	git show-branch v$kv
 	if [ $? -eq 0 ]; then
@@ -56,6 +61,9 @@ else
 		git checkout greezly
 		./scripts/greezly/merge_theirs.sh greezly linux-$kv-for-greezly
 		git branch -D linux-$kv-for-greezly
+
+		./scripts/greezly/keep_ours.sh v$base $from greezly
+		git commit --amend --no-edit
 	else
 		echo "No branch found to apply the grsecurity patch"
 		clean

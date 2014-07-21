@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# Copyright (C) 2014, Antoine Tenart <atenart@n0.pe>
+
+base=$1
+from=$2
+to=$3
+
+git checkout $base Makefile
+cp Makefile Makefile.base
+git checkout $from Makefile
+cp Makefile Makefile.from
+git checkout HEAD Makefile
+git merge-file --ours Makefile Makefile.base Makefile.from
+rm -f Makefile.base Makefile.from
+git add Makefile
