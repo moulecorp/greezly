@@ -18,13 +18,15 @@ commit() {
 
 cd $(git rev-parse --show-toplevel)
 
-wget https://grsecurity.net/stable/grsecurity-$gv-$kv-$timestamp.patch -P .. ||
-	(echo "Error while downloading the patch" && exit -1)
-wget https://grsecurity.net/stable/grsecurity-$gv-$kv-$timestamp.patch.sig -P .. ||
-	(echo "Error while downloading the signature" && exit -1)
+if [ ! -f ../grsecurity-$gv-$kv-$timestamp.patch ]; then
+	wget https://grsecurity.net/stable/grsecurity-$gv-$kv-$timestamp.patch -P .. ||
+		(echo "Error while downloading the patch" && exit -1)
+	wget https://grsecurity.net/stable/grsecurity-$gv-$kv-$timestamp.patch.sig -P .. ||
+		(echo "Error while downloading the signature" && exit -1)
 
-gpg --verify ../grsecurity-$gv-$kv-$timestamp.patch.sig ||
-	(echo "Wrong signature" && exit -1)
+	gpg --verify ../grsecurity-$gv-$kv-$timestamp.patch.sig ||
+		(echo "Wrong signature" && exit -1)
+fi
 
 git show-branch v${kv}
 if [ $? -ne 0 ]; then
