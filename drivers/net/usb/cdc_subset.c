@@ -13,13 +13,11 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/module.h>
 #include <linux/kmod.h>
-#include <linux/init.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -336,19 +334,10 @@ static struct usb_driver cdc_subset_driver = {
 	.resume =	usbnet_resume,
 	.disconnect =	usbnet_disconnect,
 	.id_table =	products,
+	.disable_hub_initiated_lpm = 1,
 };
 
-static int __init cdc_subset_init(void)
-{
-	return usb_register(&cdc_subset_driver);
-}
-module_init(cdc_subset_init);
-
-static void __exit cdc_subset_exit(void)
-{
-	usb_deregister(&cdc_subset_driver);
-}
-module_exit(cdc_subset_exit);
+module_usb_driver(cdc_subset_driver);
 
 MODULE_AUTHOR("David Brownell");
 MODULE_DESCRIPTION("Simple 'CDC Subset' USB networking links");

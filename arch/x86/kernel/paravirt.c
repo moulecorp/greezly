@@ -26,6 +26,7 @@
 
 #include <asm/bug.h>
 #include <asm/paravirt.h>
+#include <asm/debugreg.h>
 #include <asm/desc.h>
 #include <asm/setup.h>
 #include <asm/pgtable.h>
@@ -37,6 +38,7 @@
 #include <asm/apic.h>
 #include <asm/tlbflush.h>
 #include <asm/timer.h>
+#include <asm/special_insns.h>
 
 /* nop stub */
 void _paravirt_nop(void)
@@ -62,11 +64,6 @@ void __init default_banner(void)
 	printk(KERN_INFO "Booting paravirtualized kernel on %s\n",
 	       pv_info.name);
 }
-
-/* Simple instruction patching code. */
-#define DEF_NATIVE(ops, name, code)					\
-	extern const char start_##ops##_##name[], end_##ops##_##name[];	\
-	asm("start_" #ops "_" #name ": " code "; end_" #ops "_" #name ":")
 
 /* Undefined instruction for dealing with missing ops pointers. */
 static const unsigned char ud2a[] = { 0x0f, 0x0b };
@@ -209,8 +206,8 @@ static void native_flush_tlb_single(unsigned long addr)
 	__native_flush_tlb_single(addr);
 }
 
-struct jump_label_key paravirt_steal_enabled;
-struct jump_label_key paravirt_steal_rq_enabled;
+struct static_key paravirt_steal_enabled;
+struct static_key paravirt_steal_rq_enabled;
 
 static u64 native_steal_clock(int cpu)
 {
@@ -246,16 +243,16 @@ static DEFINE_PER_CPU(enum paravirt_lazy_mode, paravirt_lazy_mode) = PARAVIRT_LA
 
 static inline void enter_lazy(enum paravirt_lazy_mode mode)
 {
-	BUG_ON(percpu_read(paravirt_lazy_mode) != PARAVIRT_LAZY_NONE);
+	BUG_ON(this_cpu_read(paravirt_lazy_mode) != PARAVIRT_LAZY_NONE);
 
-	percpu_write(paravirt_lazy_mode, mode);
+	this_cpu_write(paravirt_lazy_mode, mode);
 }
 
 static void leave_lazy(enum paravirt_lazy_mode mode)
 {
-	BUG_ON(percpu_read(paravirt_lazy_mode) != mode);
+	BUG_ON(this_cpu_read(paravirt_lazy_mode) != mode);
 
-	percpu_write(paravirt_lazy_mode, PARAVIRT_LAZY_NONE);
+	this_cpu_write(paravirt_lazy_mode, PARAVIRT_LAZY_NONE);
 }
 
 void paravirt_enter_lazy_mmu(void)
@@ -284,7 +281,7 @@ void paravirt_start_context_switch(struct task_struct *prev)
 {
 	BUG_ON(preemptible());
 
-	if (percpu_read(paravirt_lazy_mode) == PARAVIRT_LAZY_MMU) {
+	if (this_cpu_read(paravirt_lazy_mode) == PARAVIRT_LAZY_MMU) {
 		arch_leave_lazy_mmu_mode();
 		set_ti_thread_flag(task_thread_info(prev), TIF_LAZY_MMU_UPDATES);
 	}
@@ -306,7 +303,7 @@ enum paravirt_lazy_mode paravirt_get_lazy_mode(void)
 	if (in_interrupt())
 		return PARAVIRT_LAZY_NONE;
 
-	return percpu_read(paravirt_lazy_mode);
+	return this_cpu_read(paravirt_lazy_mode);
 }
 
 struct pv_info pv_info __read_only = {
@@ -329,7 +326,7 @@ struct pv_time_ops pv_time_ops __read_only = {
 	.steal_clock = native_steal_clock,
 };
 
-struct pv_irq_ops pv_irq_ops __read_only = {
+__visible struct pv_irq_ops pv_irq_ops __read_only = {
 	.save_fl = __PV_IS_CALLEE_SAVE(native_save_fl),
 	.restore_fl = __PV_IS_CALLEE_SAVE(native_restore_fl),
 	.irq_disable = __PV_IS_CALLEE_SAVE(native_irq_disable),
@@ -341,7 +338,7 @@ struct pv_irq_ops pv_irq_ops __read_only = {
 #endif
 };
 
-struct pv_cpu_ops pv_cpu_ops __read_only = {
+__visible struct pv_cpu_ops pv_cpu_ops __read_only = {
 	.cpuid = native_cpuid,
 	.get_debugreg = native_get_debugreg,
 	.set_debugreg = native_set_debugreg,
@@ -357,9 +354,7 @@ struct pv_cpu_ops pv_cpu_ops __read_only = {
 #endif
 	.wbinvd = native_wbinvd,
 	.read_msr = native_read_msr_safe,
-	.rdmsr_regs = native_rdmsr_safe_regs,
 	.write_msr = native_write_msr_safe,
-	.wrmsr_regs = native_wrmsr_safe_regs,
 	.read_tsc = native_read_tsc,
 	.read_pmc = native_read_pmc,
 	.read_tscp = native_read_tscp,
@@ -367,7 +362,6 @@ struct pv_cpu_ops pv_cpu_ops __read_only = {
 	.set_ldt = native_set_ldt,
 	.load_gdt = native_load_gdt,
 	.load_idt = native_load_idt,
-	.store_gdt = native_store_gdt,
 	.store_idt = native_store_idt,
 	.store_tr = native_store_tr,
 	.load_tls = native_load_tls,

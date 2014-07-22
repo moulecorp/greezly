@@ -28,6 +28,8 @@ EXPORT_PER_CPU_SYMBOL(irq_regs);
 
 extern void gr_handle_kernel_exploit(void);
 
+int sysctl_panic_on_stackoverflow;
+
 /*
  * Probabilistic stack overflow check:
  *
@@ -38,19 +40,41 @@ extern void gr_handle_kernel_exploit(void);
 static inline void stack_overflow_check(struct pt_regs *regs)
 {
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
+#define STACK_TOP_MARGIN	128
+	struct orig_ist *oist;
+	u64 irq_stack_top, irq_stack_bottom;
+	u64 estack_top, estack_bottom;
 	u64 curbase = (u64)task_stack_page(current);
 
 	if (user_mode(regs))
 		return;
 
-	if (regs->sp >= curbase &&
-	    regs->sp <= curbase + THREAD_SIZE &&
-	    regs->sp <  curbase + sizeof(struct thread_info) +
-				sizeof(struct pt_regs) + 128) {
-		WARN_ONCE(1, "do_IRQ: %s near stack overflow (cur:%Lx,sp:%lx)\n",
-			current->comm, curbase, regs->sp);
-		gr_handle_kernel_exploit();
-	}
+	if (regs->sp >= curbase + sizeof(struct thread_info) +
+				  sizeof(struct pt_regs) + STACK_TOP_MARGIN &&
+	    regs->sp <= curbase + THREAD_SIZE)
+		return;
+
+	irq_stack_top = (u64)__get_cpu_var(irq_stack_union.irq_stack) +
+			STACK_TOP_MARGIN;
+	irq_stack_bottom = (u64)__get_cpu_var(irq_stack_ptr);
+	if (regs->sp >= irq_stack_top && regs->sp <= irq_stack_bottom)
+		return;
+
+	oist = &__get_cpu_var(orig_ist);
+	estack_top = (u64)oist->ist[0] - EXCEPTION_STKSZ + STACK_TOP_MARGIN;
+	estack_bottom = (u64)oist->ist[N_EXCEPTION_STACKS - 1];
+	if (regs->sp >= estack_top && regs->sp <= estack_bottom)
+		return;
+
+	WARN_ONCE(1, "do_IRQ(): %s has overflown the kernel stack (cur:%Lx,sp:%lx,irq stk top-bottom:%Lx-%Lx,exception stk top-bottom:%Lx-%Lx)\n",
+		current->comm, curbase, regs->sp,
+		irq_stack_top, irq_stack_bottom,
+		estack_top, estack_bottom);
+
+	gr_handle_kernel_exploit();
+
+	if (sysctl_panic_on_stackoverflow)
+		panic("low stack detected by irq handler - check messages\n");
 #endif
 }
 
@@ -66,25 +90,4 @@ bool handle_irq(unsigned irq, struct pt_regs *regs)
 
 	generic_handle_irq_desc(irq, desc);
 	return true;
-}
-
-
-extern void call_softirq(void);
-
-asmlinkage void do_softirq(void)
-{
-	__u32 pending;
-	unsigned long flags;
-
-	if (in_interrupt())
-		return;
-
-	local_irq_save(flags);
-	pending = local_softirq_pending();
-	/* Switch to interrupt stack */
-	if (pending) {
-		call_softirq();
-		WARN_ON_ONCE(softirq_count());
-	}
-	local_irq_restore(flags);
 }

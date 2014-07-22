@@ -109,9 +109,10 @@ gr_insertsort(void)
 }
 
 static __inline__ void
-gr_insert_uid(const uid_t uid, const unsigned long expires)
+gr_insert_uid(const kuid_t kuid, const unsigned long expires)
 {
 	int loc;
+	uid_t uid = GR_GLOBAL_UID(kuid);
 
 	if (uid_used == GR_UIDTABLE_MAX)
 		return;
@@ -146,13 +147,16 @@ gr_remove_uid(const unsigned short loc)
 }
 
 int
-gr_check_crash_uid(const uid_t uid)
+gr_check_crash_uid(const kuid_t kuid)
 {
 	int loc;
 	int ret = 0;
+	uid_t uid;
 
 	if (unlikely(!gr_acl_is_enabled()))
 		return 0;
+
+	uid = GR_GLOBAL_UID(kuid);
 
 	spin_lock(&gr_uid_lock);
 	loc = gr_find_uid(uid);
@@ -173,11 +177,11 @@ out_unlock:
 static __inline__ int
 proc_is_setxid(const struct cred *cred)
 {
-	if (cred->uid != cred->euid || cred->uid != cred->suid ||
-	    cred->uid != cred->fsuid)
+	if (!uid_eq(cred->uid, cred->euid) || !uid_eq(cred->uid, cred->suid) ||
+	    !uid_eq(cred->uid, cred->fsuid))
 		return 1;
-	if (cred->gid != cred->egid || cred->gid != cred->sgid ||
-	    cred->gid != cred->fsgid)
+	if (!gid_eq(cred->gid, cred->egid) || !gid_eq(cred->gid, cred->sgid) ||
+	    !gid_eq(cred->gid, cred->fsgid))
 		return 1;
 
 	return 0;
@@ -218,7 +222,7 @@ gr_handle_crash(struct task_struct *task, const int sig)
 	    time_after(curr->expires, get_seconds())) {
 		rcu_read_lock();
 		cred = __task_cred(task);
-		if (cred->uid && proc_is_setxid(cred)) {
+		if (gr_is_global_nonroot(cred->uid) && proc_is_setxid(cred)) {
 			gr_log_crash1(GR_DONT_AUDIT, GR_SEGVSTART_ACL_MSG, task, curr->res[GR_CRASH_RES].rlim_max);
 			spin_lock(&gr_uid_lock);
 			gr_insert_uid(cred->uid, curr->expires);
@@ -228,7 +232,7 @@ gr_handle_crash(struct task_struct *task, const int sig)
 			read_lock(&tasklist_lock);
 			do_each_thread(tsk2, tsk) {
 				cred2 = __task_cred(tsk);
-				if (tsk != task && cred2->uid == cred->uid)
+				if (tsk != task && uid_eq(cred2->uid, cred->uid))
 					gr_fake_force_sig(SIGKILL, tsk);
 			} while_each_thread(tsk2, tsk);
 			read_unlock(&tasklist_lock);

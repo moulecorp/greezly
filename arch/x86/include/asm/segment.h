@@ -188,6 +188,8 @@
 #define GDT_ENTRY_PER_CPU 15	/* Abused to load per CPU data from limit */
 #define __PER_CPU_SEG	(GDT_ENTRY_PER_CPU * 8 + 3)
 
+#define GDT_ENTRY_UDEREF_KERNEL_DS 16
+
 /* TLS indexes for 64bit - hardcoded in arch_prctl */
 #define FS_TLS 0
 #define GS_TLS 1
@@ -195,13 +197,14 @@
 #define GS_TLS_SEL ((GDT_ENTRY_TLS_MIN+GS_TLS)*8 + 3)
 #define FS_TLS_SEL ((GDT_ENTRY_TLS_MIN+FS_TLS)*8 + 3)
 
-#define GDT_ENTRIES 16
+#define GDT_ENTRIES 17
 
 #endif
 
 #define __KERNEL_CS	(GDT_ENTRY_KERNEL_CS*8)
 #define __KERNEXEC_KERNEL_CS	(GDT_ENTRY_KERNEXEC_KERNEL_CS*8)
 #define __KERNEL_DS	(GDT_ENTRY_KERNEL_DS*8)
+#define __UDEREF_KERNEL_DS	(GDT_ENTRY_UDEREF_KERNEL_DS*8)
 #define __USER_DS	(GDT_ENTRY_DEFAULT_USER_DS*8+3)
 #define __USER_CS	(GDT_ENTRY_DEFAULT_USER_CS*8+3)
 #ifndef CONFIG_PARAVIRT
@@ -221,14 +224,73 @@
 
 #define IDT_ENTRIES 256
 #define NUM_EXCEPTION_VECTORS 32
+/* Bitmask of exception vectors which push an error code on the stack */
+#define EXCEPTION_ERRCODE_MASK  0x00027d00
 #define GDT_SIZE (GDT_ENTRIES * 8)
 #define GDT_ENTRY_TLS_ENTRIES 3
 #define TLS_SIZE (GDT_ENTRY_TLS_ENTRIES * 8)
 
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
-extern const char early_idt_handlers[NUM_EXCEPTION_VECTORS][10];
+extern const char early_idt_handlers[NUM_EXCEPTION_VECTORS][2+2+5];
+#ifdef CONFIG_TRACING
+#define trace_early_idt_handlers early_idt_handlers
 #endif
-#endif
+
+/*
+ * Load a segment. Fall back on loading the zero
+ * segment if something goes wrong..
+ */
+#define loadsegment(seg, value)						\
+do {									\
+	unsigned short __val = (value);					\
+									\
+	asm volatile("						\n"	\
+		     "1:	movl %k0,%%" #seg "		\n"	\
+									\
+		     ".section .fixup,\"ax\"			\n"	\
+		     "2:	xorl %k0,%k0			\n"	\
+		     "		jmp 1b				\n"	\
+		     ".previous					\n"	\
+									\
+		     _ASM_EXTABLE(1b, 2b)				\
+									\
+		     : "+r" (__val) : : "memory");			\
+} while (0)
+
+/*
+ * Save a segment register away
+ */
+#define savesegment(seg, value)				\
+	asm("mov %%" #seg ",%0":"=r" (value) : : "memory")
+
+/*
+ * x86_32 user gs accessors.
+ */
+#ifdef CONFIG_X86_32
+#ifdef CONFIG_X86_32_LAZY_GS
+#define get_user_gs(regs)	(u16)({unsigned long v; savesegment(gs, v); v;})
+#define set_user_gs(regs, v)	loadsegment(gs, (unsigned long)(v))
+#define task_user_gs(tsk)	((tsk)->thread.gs)
+#define lazy_save_gs(v)		savesegment(gs, (v))
+#define lazy_load_gs(v)		loadsegment(gs, (v))
+#else	/* X86_32_LAZY_GS */
+#define get_user_gs(regs)	(u16)((regs)->gs)
+#define set_user_gs(regs, v)	do { (regs)->gs = (v); } while (0)
+#define task_user_gs(tsk)	(task_pt_regs(tsk)->gs)
+#define lazy_save_gs(v)		do { } while (0)
+#define lazy_load_gs(v)		do { } while (0)
+#endif	/* X86_32_LAZY_GS */
+#endif	/* X86_32 */
+
+static inline unsigned long get_limit(unsigned long segment)
+{
+	unsigned long __limit;
+	asm("lsll %1,%0" : "=r" (__limit) : "r" (segment));
+	return __limit;
+}
+
+#endif /* !__ASSEMBLY__ */
+#endif /* __KERNEL__ */
 
 #endif /* _ASM_X86_SEGMENT_H */

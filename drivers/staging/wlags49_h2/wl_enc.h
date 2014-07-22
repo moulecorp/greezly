@@ -22,7 +22,7 @@
  * software indicates your acceptance of these terms and conditions.  If you do
  * not agree with these terms and conditions, do not use the software.
  *
- * Copyright © 2003 Agere Systems Inc.
+ * Copyright Â© 2003 Agere Systems Inc.
  * All rights reserved.
  *
  * Redistribution and use in source or binary forms, with or without
@@ -43,7 +43,7 @@
  *
  * Disclaimer
  *
- * THIS SOFTWARE IS PROVIDED “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * THIS SOFTWARE IS PROVIDED Â“AS ISÂ” AND ANY EXPRESS OR IMPLIED WARRANTIES,
  * INCLUDING, BUT NOT LIMITED TO, INFRINGEMENT AND THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  ANY
  * USE, MODIFICATION OR DISTRIBUTION OF THIS SOFTWARE IS SOLELY AT THE USERS OWN
@@ -69,7 +69,7 @@
  ******************************************************************************/
 #define CRYPT_CODE					"57617665A5D6"
 #define ENCRYPTION_LEN				102
-#define ENCRYPTION_MAGIC			0x48576877L	// HWhw
+#define ENCRYPTION_MAGIC			0x48576877L	/* HWhw */
 #define DEF_CRYPT_STR				"G?TIUEA]d5MAdZV'eUb&&6.)'&:,'VF/(FR2)6^5*'*8*W6;+GB>,7NA-'ZD-X&G.H2J/8>M0(JP0XVS1HbV29.Y3):\\3YF_4IRb56"
 
 #define DEFAULT_CRYPT_MAC			"W\x01\x6B\x66\xA5\x5A"
@@ -106,7 +106,7 @@ ENCSTRCT, *PENCSTRCT;
 
 
 /*******************************************************************************
- * function prrottypes
+ * function prototypes
  ******************************************************************************/
 int wl_wep_code( char *szCrypt, char *szDest, void *Data, int nLen );
 
@@ -115,4 +115,4 @@ int wl_wep_decode( char *szCrypt, void *Dest, char *szData );
 
 
 
-#endif  // __WAVELAN2_ENCRYPTION_H__
+#endif  /* __WAVELAN2_ENCRYPTION_H__ */

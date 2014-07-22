@@ -26,19 +26,21 @@ static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
 
 #if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
-	unsigned int i;
-	pgd_t *pgd;
+	if (!(static_cpu_has(X86_FEATURE_PCID))) {
+		unsigned int i;
+		pgd_t *pgd;
 
-	pax_open_kernel();
-	pgd = get_cpu_pgd(smp_processor_id());
-	for (i = USER_PGD_PTRS; i < 2 * USER_PGD_PTRS; ++i)
-		set_pgd_batched(pgd+i, native_make_pgd(0));
-	pax_close_kernel();
+		pax_open_kernel();
+		pgd = get_cpu_pgd(smp_processor_id(), kernel);
+		for (i = USER_PGD_PTRS; i < 2 * USER_PGD_PTRS; ++i)
+			set_pgd_batched(pgd+i, native_make_pgd(0));
+		pax_close_kernel();
+	}
 #endif
 
 #ifdef CONFIG_SMP
-	if (percpu_read(cpu_tlbstate.state) == TLBSTATE_OK)
-		percpu_write(cpu_tlbstate.state, TLBSTATE_LAZY);
+	if (this_cpu_read(cpu_tlbstate.state) == TLBSTATE_OK)
+		this_cpu_write(cpu_tlbstate.state, TLBSTATE_LAZY);
 #endif
 }
 
@@ -53,30 +55,57 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	if (likely(prev != next)) {
 #ifdef CONFIG_SMP
 #if defined(CONFIG_X86_32) && (defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC))
-		tlbstate = percpu_read(cpu_tlbstate.state);
+		tlbstate = this_cpu_read(cpu_tlbstate.state);
 #endif
-		percpu_write(cpu_tlbstate.state, TLBSTATE_OK);
-		percpu_write(cpu_tlbstate.active_mm, next);
+		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
+		this_cpu_write(cpu_tlbstate.active_mm, next);
 #endif
 		cpumask_set_cpu(cpu, mm_cpumask(next));
 
 		/* Re-load page tables */
 #ifdef CONFIG_PAX_PER_CPU_PGD
 		pax_open_kernel();
-		__clone_user_pgds(get_cpu_pgd(cpu), next->pgd);
-		__shadow_user_pgds(get_cpu_pgd(cpu) + USER_PGD_PTRS, next->pgd);
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (static_cpu_has(X86_FEATURE_PCID))
+			__clone_user_pgds(get_cpu_pgd(cpu, user), next->pgd);
+		else
+#endif
+
+		__clone_user_pgds(get_cpu_pgd(cpu, kernel), next->pgd);
+		__shadow_user_pgds(get_cpu_pgd(cpu, kernel) + USER_PGD_PTRS, next->pgd);
 		pax_close_kernel();
-		load_cr3(get_cpu_pgd(cpu));
+		BUG_ON((__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL) != (read_cr3() & __PHYSICAL_MASK) && (__pa(get_cpu_pgd(cpu, user)) | PCID_USER) != (read_cr3() & __PHYSICAL_MASK));
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (static_cpu_has(X86_FEATURE_PCID)) {
+			if (static_cpu_has(X86_FEATURE_INVPCID)) {
+				u64 descriptor[2];
+				descriptor[0] = PCID_USER;
+				asm volatile(__ASM_INVPCID : : "d"(&descriptor), "a"(INVPCID_SINGLE_CONTEXT) : "memory");
+				if (!static_cpu_has(X86_FEATURE_STRONGUDEREF)) {
+					descriptor[0] = PCID_KERNEL;
+					asm volatile(__ASM_INVPCID : : "d"(&descriptor), "a"(INVPCID_SINGLE_CONTEXT) : "memory");
+				}
+			} else {
+				write_cr3(__pa(get_cpu_pgd(cpu, user)) | PCID_USER);
+				if (static_cpu_has(X86_FEATURE_STRONGUDEREF))
+					write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL | PCID_NOFLUSH);
+				else
+					write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL);
+			}
+		} else
+#endif
+
+			load_cr3(get_cpu_pgd(cpu, kernel));
 #else
 		load_cr3(next->pgd);
 #endif
 
-		/* stop flush ipis for the previous mm */
+		/* Stop flush ipis for the previous mm */
 		cpumask_clear_cpu(cpu, mm_cpumask(prev));
 
-		/*
-		 * load the LDT, if the LDT is different:
-		 */
+		/* Load the LDT, if the LDT is different: */
 		if (unlikely(prev->context.ldt != next->context.ldt))
 			load_LDT_nolock(&next->context);
 
@@ -104,18 +133,55 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 
 #ifdef CONFIG_PAX_PER_CPU_PGD
 		pax_open_kernel();
-		__clone_user_pgds(get_cpu_pgd(cpu), next->pgd);
-		__shadow_user_pgds(get_cpu_pgd(cpu) + USER_PGD_PTRS, next->pgd);
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (static_cpu_has(X86_FEATURE_PCID))
+			__clone_user_pgds(get_cpu_pgd(cpu, user), next->pgd);
+		else
+#endif
+
+		__clone_user_pgds(get_cpu_pgd(cpu, kernel), next->pgd);
+		__shadow_user_pgds(get_cpu_pgd(cpu, kernel) + USER_PGD_PTRS, next->pgd);
 		pax_close_kernel();
-		load_cr3(get_cpu_pgd(cpu));
+		BUG_ON((__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL) != (read_cr3() & __PHYSICAL_MASK) && (__pa(get_cpu_pgd(cpu, user)) | PCID_USER) != (read_cr3() & __PHYSICAL_MASK));
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (static_cpu_has(X86_FEATURE_PCID)) {
+			if (static_cpu_has(X86_FEATURE_INVPCID)) {
+				u64 descriptor[2];
+				descriptor[0] = PCID_USER;
+				asm volatile(__ASM_INVPCID : : "d"(&descriptor), "a"(INVPCID_SINGLE_CONTEXT) : "memory");
+				if (!static_cpu_has(X86_FEATURE_STRONGUDEREF)) {
+					descriptor[0] = PCID_KERNEL;
+					asm volatile(__ASM_INVPCID : : "d"(&descriptor), "a"(INVPCID_SINGLE_CONTEXT) : "memory");
+				}
+			} else {
+				write_cr3(__pa(get_cpu_pgd(cpu, user)) | PCID_USER);
+				if (static_cpu_has(X86_FEATURE_STRONGUDEREF))
+					write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL | PCID_NOFLUSH);
+				else
+					write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL);
+			}
+		} else
+#endif
+
+			load_cr3(get_cpu_pgd(cpu, kernel));
 #endif
 
 #ifdef CONFIG_SMP
-		percpu_write(cpu_tlbstate.state, TLBSTATE_OK);
-		BUG_ON(percpu_read(cpu_tlbstate.active_mm) != next);
+		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
+		BUG_ON(this_cpu_read(cpu_tlbstate.active_mm) != next);
 
-		if (!cpumask_test_and_set_cpu(cpu, mm_cpumask(next))) {
-			/* We were in lazy tlb mode and leave_mm disabled
+		if (!cpumask_test_cpu(cpu, mm_cpumask(next))) {
+			/*
+			 * On established mms, the mm_cpumask is only changed
+			 * from irq context, from ptep_clear_flush() while in
+			 * lazy tlb mode, and here. Irqs are blocked during
+			 * schedule, protecting us from simultaneous changes.
+			 */
+			cpumask_set_cpu(cpu, mm_cpumask(next));
+			/*
+			 * We were in lazy tlb mode and leave_mm disabled
 			 * tlb flush IPI delivery. We must reload CR3
 			 * to make sure to use no freed page tables.
 			 */

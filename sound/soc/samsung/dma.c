@@ -35,12 +35,6 @@ static const struct snd_pcm_hardware dma_hardware = {
 				    SNDRV_PCM_INFO_BLOCK_TRANSFER |
 				    SNDRV_PCM_INFO_MMAP |
 				    SNDRV_PCM_INFO_MMAP_VALID,
-	.formats		= SNDRV_PCM_FMTBIT_S16_LE |
-				    SNDRV_PCM_FMTBIT_U16_LE |
-				    SNDRV_PCM_FMTBIT_U8 |
-				    SNDRV_PCM_FMTBIT_S8,
-	.channels_min		= 2,
-	.channels_max		= 2,
 	.buffer_bytes_max	= 128*1024,
 	.period_bytes_min	= PAGE_SIZE,
 	.period_bytes_max	= PAGE_SIZE*2,
@@ -72,7 +66,7 @@ static void dma_enqueue(struct snd_pcm_substream *substream)
 	struct runtime_data *prtd = substream->runtime->private_data;
 	dma_addr_t pos = prtd->dma_pos;
 	unsigned int limit;
-	struct samsung_dma_prep_info dma_info;
+	struct samsung_dma_prep dma_info;
 
 	pr_debug("Entered %s\n", __func__);
 
@@ -84,11 +78,18 @@ static void dma_enqueue(struct snd_pcm_substream *substream)
 	dma_info.cap = (samsung_dma_has_circular() ? DMA_CYCLIC : DMA_SLAVE);
 	dma_info.direction =
 		(substream->stream == SNDRV_PCM_STREAM_PLAYBACK
-		? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+		? DMA_MEM_TO_DEV : DMA_DEV_TO_MEM);
 	dma_info.fp = audio_buffdone;
 	dma_info.fp_param = substream;
 	dma_info.period = prtd->dma_period;
 	dma_info.len = prtd->dma_period*limit;
+
+	if (dma_info.cap == DMA_CYCLIC) {
+		dma_info.buf = pos;
+		prtd->params->ops->prepare(prtd->params->ch, &dma_info);
+		prtd->dma_loaded += limit;
+		return;
+	}
 
 	while (prtd->dma_loaded < limit) {
 		pr_debug("dma_loaded: %d\n", prtd->dma_loaded);
@@ -144,7 +145,8 @@ static int dma_hw_params(struct snd_pcm_substream *substream,
 	unsigned long totbytes = params_buffer_bytes(params);
 	struct s3c_dma_params *dma =
 		snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
-	struct samsung_dma_info dma_info;
+	struct samsung_dma_req req;
+	struct samsung_dma_config config;
 
 	pr_debug("Entered %s\n", __func__);
 
@@ -164,16 +166,22 @@ static int dma_hw_params(struct snd_pcm_substream *substream,
 
 		prtd->params->ops = samsung_dma_get_ops();
 
-		dma_info.cap = (samsung_dma_has_circular() ?
+		req.cap = (samsung_dma_has_circular() ?
 			DMA_CYCLIC : DMA_SLAVE);
-		dma_info.client = prtd->params->client;
-		dma_info.direction =
+		req.client = prtd->params->client;
+		config.direction =
 			(substream->stream == SNDRV_PCM_STREAM_PLAYBACK
-			? DMA_TO_DEVICE : DMA_FROM_DEVICE);
-		dma_info.width = prtd->params->dma_size;
-		dma_info.fifo = prtd->params->dma_addr;
+			? DMA_MEM_TO_DEV : DMA_DEV_TO_MEM);
+		config.width = prtd->params->dma_size;
+		config.fifo = prtd->params->dma_addr;
 		prtd->params->ch = prtd->params->ops->request(
-				prtd->params->channel, &dma_info);
+				prtd->params->channel, &req, rtd->cpu_dai->dev,
+				prtd->params->ch_name);
+		if (!prtd->params->ch) {
+			pr_err("Failed to allocate DMA channel\n");
+			return -ENXIO;
+		}
+		prtd->params->ops->config(prtd->params->ch, &config);
 	}
 
 	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
@@ -392,30 +400,26 @@ static void dma_free_dma_buffers(struct snd_pcm *pcm)
 	}
 }
 
-static u64 dma_mask = DMA_BIT_MASK(32);
-
 static int dma_new(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_card *card = rtd->card->snd_card;
-	struct snd_soc_dai *dai = rtd->cpu_dai;
 	struct snd_pcm *pcm = rtd->pcm;
-	int ret = 0;
+	int ret;
 
 	pr_debug("Entered %s\n", __func__);
 
-	if (!card->dev->dma_mask)
-		card->dev->dma_mask = &dma_mask;
-	if (!card->dev->coherent_dma_mask)
-		card->dev->coherent_dma_mask = 0xffffffff;
+	ret = dma_coerce_mask_and_coherent(card->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
 
-	if (dai->driver->playback.channels_min) {
+	if (pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream) {
 		ret = preallocate_dma_buffer(pcm,
 			SNDRV_PCM_STREAM_PLAYBACK);
 		if (ret)
 			goto out;
 	}
 
-	if (dai->driver->capture.channels_min) {
+	if (pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream) {
 		ret = preallocate_dma_buffer(pcm,
 			SNDRV_PCM_STREAM_CAPTURE);
 		if (ret)
@@ -431,40 +435,26 @@ static struct snd_soc_platform_driver samsung_asoc_platform = {
 	.pcm_free	= dma_free_dma_buffers,
 };
 
-static int __devinit samsung_asoc_platform_probe(struct platform_device *pdev)
+void samsung_asoc_init_dma_data(struct snd_soc_dai *dai,
+				struct s3c_dma_params *playback,
+				struct s3c_dma_params *capture)
 {
-	return snd_soc_register_platform(&pdev->dev, &samsung_asoc_platform);
+	snd_soc_dai_init_dma_data(dai, playback, capture);
 }
+EXPORT_SYMBOL_GPL(samsung_asoc_init_dma_data);
 
-static int __devexit samsung_asoc_platform_remove(struct platform_device *pdev)
+int samsung_asoc_dma_platform_register(struct device *dev)
 {
-	snd_soc_unregister_platform(&pdev->dev);
-	return 0;
+	return snd_soc_register_platform(dev, &samsung_asoc_platform);
 }
+EXPORT_SYMBOL_GPL(samsung_asoc_dma_platform_register);
 
-static struct platform_driver asoc_dma_driver = {
-	.driver = {
-		.name = "samsung-audio",
-		.owner = THIS_MODULE,
-	},
-
-	.probe = samsung_asoc_platform_probe,
-	.remove = __devexit_p(samsung_asoc_platform_remove),
-};
-
-static int __init samsung_asoc_init(void)
+void samsung_asoc_dma_platform_unregister(struct device *dev)
 {
-	return platform_driver_register(&asoc_dma_driver);
+	snd_soc_unregister_platform(dev);
 }
-module_init(samsung_asoc_init);
-
-static void __exit samsung_asoc_exit(void)
-{
-	platform_driver_unregister(&asoc_dma_driver);
-}
-module_exit(samsung_asoc_exit);
+EXPORT_SYMBOL_GPL(samsung_asoc_dma_platform_unregister);
 
 MODULE_AUTHOR("Ben Dooks, <ben@simtec.co.uk>");
 MODULE_DESCRIPTION("Samsung ASoC DMA Driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:samsung-audio");

@@ -23,15 +23,15 @@
 #include <asm/module.h>
 #include <asm/pgtable.h>
 
-#include <trace/events/module.h>
+/* In stripped ARM and x86-64 modules, ~ is surprisingly rare. */
+#define MODULE_SIG_STRING "~Module signature appended~\n"
 
 /* Not Yet Implemented */
 #define MODULE_SUPPORTED_DEVICE(name)
 
 #define MODULE_NAME_LEN MAX_PARAM_PREFIX_LEN
 
-struct modversion_info
-{
+struct modversion_info {
 	unsigned long crc;
 	char name[MODULE_NAME_LEN];
 };
@@ -43,6 +43,7 @@ struct module_kobject {
 	struct module *mod;
 	struct kobject *drivers_dir;
 	struct module_param_attrs *mp;
+	struct completion *kobj_completion;
 } __randomize_layout;
 
 struct module_attribute {
@@ -85,12 +86,12 @@ void sort_main_extable(void);
 void trim_init_extable(struct module *m);
 
 #ifdef MODULE
-#define MODULE_GENERIC_TABLE(gtype,name)			\
+#define MODULE_GENERIC_TABLE(gtype, name)			\
 extern const struct gtype##_id __mod_##gtype##_table		\
   __attribute__ ((unused, alias(__stringify(name))))
 
 #else  /* !MODULE */
-#define MODULE_GENERIC_TABLE(gtype,name)
+#define MODULE_GENERIC_TABLE(gtype, name)
 #endif
 
 /* Generic info of form tag = "info" */
@@ -98,6 +99,11 @@ extern const struct gtype##_id __mod_##gtype##_table		\
 
 /* For userspace: you can also call me... */
 #define MODULE_ALIAS(_alias) MODULE_INFO(alias, _alias)
+
+/* Soft module dependencies. See man modprobe.d for details.
+ * Example: MODULE_SOFTDEP("pre: module-foo module-bar post: module-baz")
+ */
+#define MODULE_SOFTDEP(_softdep) MODULE_INFO(softdep, _softdep)
 
 /*
  * The following license idents are currently accepted as indicating free
@@ -122,7 +128,7 @@ extern const struct gtype##_id __mod_##gtype##_table		\
  * is a GPL combined work.
  *
  * This exists for several reasons
- * 1.	So modinfo can show license info for users wanting to vet their setup 
+ * 1.	So modinfo can show license info for users wanting to vet their setup
  *	is free
  * 2.	So the community can ignore bug reports including proprietary modules
  * 3.	So vendors can do likewise based on their own policies
@@ -134,27 +140,29 @@ extern const struct gtype##_id __mod_##gtype##_table		\
  * authors use multiple MODULE_AUTHOR() statements/lines.
  */
 #define MODULE_AUTHOR(_author) MODULE_INFO(author, _author)
-  
+
 /* What your module does. */
 #define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)
 
-#define MODULE_DEVICE_TABLE(type,name)		\
-  MODULE_GENERIC_TABLE(type##_device,name)
+#define MODULE_DEVICE_TABLE(type, name)		\
+  MODULE_GENERIC_TABLE(type##_device, name)
 
 /* Version of form [<epoch>:]<version>[-<extra-version>].
-   Or for CVS/RCS ID version, everything but the number is stripped.
-  <epoch>: A (small) unsigned integer which allows you to start versions
-           anew. If not mentioned, it's zero.  eg. "2:1.0" is after
-	   "1:2.0".
-  <version>: The <version> may contain only alphanumerics and the
-           character `.'.  Ordered by numeric sort for numeric parts,
-	   ascii sort for ascii parts (as per RPM or DEB algorithm).
-  <extraversion>: Like <version>, but inserted for local
-           customizations, eg "rh3" or "rusty1".
+ * Or for CVS/RCS ID version, everything but the number is stripped.
+ * <epoch>: A (small) unsigned integer which allows you to start versions
+ * anew. If not mentioned, it's zero.  eg. "2:1.0" is after
+ * "1:2.0".
 
-  Using this automatically adds a checksum of the .c files and the
-  local headers in "srcversion".
-*/
+ * <version>: The <version> may contain only alphanumerics and the
+ * character `.'.  Ordered by numeric sort for numeric parts,
+ * ascii sort for ascii parts (as per RPM or DEB algorithm).
+
+ * <extraversion>: Like <version>, but inserted for local
+ * customizations, eg "rh3" or "rusty1".
+
+ * Using this automatically adds a checksum of the .c files and the
+ * local headers in "srcversion".
+ */
 
 #if defined(MODULE) || !defined(CONFIG_SYSFS)
 #define MODULE_VERSION(_version) MODULE_INFO(version, _version)
@@ -192,7 +200,7 @@ extern int modules_disabled; /* for sysctl */
 /* Get/put a kernel symbol (calls must be symmetric) */
 void *__symbol_get(const char *symbol);
 void *__symbol_get_gpl(const char *symbol);
-#define symbol_get(x) ((typeof(&x))(__symbol_get(MODULE_SYMBOL_PREFIX #x)))
+#define symbol_get(x) ((typeof(&x))(__symbol_get(VMLINUX_SYMBOL_STR(x))))
 
 /* modules using other modules: kdb wants to see this. */
 struct module_use {
@@ -201,15 +209,28 @@ struct module_use {
 	struct module *source, *target;
 };
 
-enum module_state
-{
-	MODULE_STATE_LIVE,
-	MODULE_STATE_COMING,
-	MODULE_STATE_GOING,
+enum module_state {
+	MODULE_STATE_LIVE,	/* Normal state. */
+	MODULE_STATE_COMING,	/* Full formed, running module_init. */
+	MODULE_STATE_GOING,	/* Going away. */
+	MODULE_STATE_UNFORMED,	/* Still setting it up. */
 };
 
-struct module
-{
+/**
+ * struct module_ref - per cpu module reference counts
+ * @incs: number of module get on this cpu
+ * @decs: number of module put on this cpu
+ *
+ * We force an alignment on 8 or 16 bytes, so that alloc_percpu()
+ * put @incs/@decs in same cache line, with no extra memory cost,
+ * since alloc_percpu() is fine grained.
+ */
+struct module_ref {
+	unsigned long incs;
+	unsigned long decs;
+} __attribute((aligned(2 * sizeof(unsigned long))));
+
+struct module {
 	enum module_state state;
 
 	/* Member of list of modules */
@@ -249,6 +270,11 @@ struct module
 	unsigned int num_unused_gpl_syms;
 	const struct kernel_symbol *unused_gpl_syms;
 	const unsigned long *unused_gpl_crcs;
+#endif
+
+#ifdef CONFIG_MODULE_SIG
+	/* Signature was verified. */
+	bool sig_ok;
 #endif
 
 	/* symbols that will be GPL-only in the near future. */
@@ -345,16 +371,10 @@ struct module
 	/* What modules do I depend on? */
 	struct list_head target_list;
 
-	/* Who is waiting for us to be unloaded */
-	struct task_struct *waiter;
-
 	/* Destruction function. */
 	void (*exit)(void);
 
-	struct module_ref {
-		unsigned int incs;
-		unsigned int decs;
-	} __percpu *refptr;
+	struct module_ref __percpu *refptr;
 #endif
 
 #ifdef CONFIG_CONSTRUCTORS
@@ -395,32 +415,32 @@ static inline int within_module_range(unsigned long addr, void *start, unsigned 
 	return ((void *)addr >= start && (void *)addr < start + size);
 }
 
-static inline int within_module_core_rx(unsigned long addr, struct module *mod)
+static inline int within_module_core_rx(unsigned long addr, const struct module *mod)
 {
 	return within_module_range(addr, mod->module_core_rx, mod->core_size_rx);
 }
 
-static inline int within_module_core_rw(unsigned long addr, struct module *mod)
+static inline int within_module_core_rw(unsigned long addr, const struct module *mod)
 {
 	return within_module_range(addr, mod->module_core_rw, mod->core_size_rw);
 }
 
-static inline int within_module_init_rx(unsigned long addr, struct module *mod)
+static inline int within_module_init_rx(unsigned long addr, const struct module *mod)
 {
 	return within_module_range(addr, mod->module_init_rx, mod->init_size_rx);
 }
 
-static inline int within_module_init_rw(unsigned long addr, struct module *mod)
+static inline int within_module_init_rw(unsigned long addr, const struct module *mod)
 {
 	return within_module_range(addr, mod->module_init_rw, mod->init_size_rw);
 }
 
-static inline int within_module_core(unsigned long addr, struct module *mod)
+static inline int within_module_core(unsigned long addr, const struct module *mod)
 {
 	return within_module_core_rx(addr, mod) || within_module_core_rw(addr, mod);
 }
 
-static inline int within_module_init(unsigned long addr, struct module *mod)
+static inline int within_module_init(unsigned long addr, const struct module *mod)
 {
 	return within_module_init_rx(addr, mod) || within_module_init_rw(addr, mod);
 }
@@ -465,43 +485,21 @@ int module_kallsyms_on_each_symbol(int (*fn)(void *, const char *,
 
 extern void __module_put_and_exit(struct module *mod, long code)
 	__attribute__((noreturn));
-#define module_put_and_exit(code) __module_put_and_exit(THIS_MODULE, code);
+#define module_put_and_exit(code) __module_put_and_exit(THIS_MODULE, code)
 
 #ifdef CONFIG_MODULE_UNLOAD
-unsigned int module_refcount(struct module *mod);
+unsigned long module_refcount(struct module *mod);
 void __symbol_put(const char *symbol);
-#define symbol_put(x) __symbol_put(MODULE_SYMBOL_PREFIX #x)
+#define symbol_put(x) __symbol_put(VMLINUX_SYMBOL_STR(x))
 void symbol_put_addr(void *addr);
 
 /* Sometimes we know we already have a refcount, and it's easier not
    to handle the error case (which only happens with rmmod --wait). */
-static inline void __module_get(struct module *module)
-{
-	if (module) {
-		preempt_disable();
-		__this_cpu_inc(module->refptr->incs);
-		trace_module_get(module, _THIS_IP_);
-		preempt_enable();
-	}
-}
+extern void __module_get(struct module *module);
 
-static inline int try_module_get(struct module *module)
-{
-	int ret = 1;
-
-	if (module) {
-		preempt_disable();
-
-		if (likely(module_is_live(module))) {
-			__this_cpu_inc(module->refptr->incs);
-			trace_module_get(module, _THIS_IP_);
-		} else
-			ret = 0;
-
-		preempt_enable();
-	}
-	return ret;
-}
+/* This is the Right Way to get a module: if it fails, it's being removed,
+ * so pretend it's not there. */
+extern bool try_module_get(struct module *module);
 
 extern void module_put(struct module *module);
 
@@ -516,8 +514,8 @@ static inline void module_put(struct module *module)
 static inline void __module_get(struct module *module)
 {
 }
-#define symbol_put(x) do { } while(0)
-#define symbol_put_addr(p) do { } while(0)
+#define symbol_put(x) do { } while (0)
+#define symbol_put_addr(p) do { } while (0)
 
 #endif /* CONFIG_MODULE_UNLOAD */
 int ref_module(struct module *a, struct module *b);
@@ -543,8 +541,8 @@ int lookup_module_symbol_attrs(unsigned long addr, unsigned long *size, unsigned
 /* For extable.c to search modules' exception tables. */
 const struct exception_table_entry *search_module_extables(unsigned long addr);
 
-int register_module_notifier(struct notifier_block * nb);
-int unregister_module_notifier(struct notifier_block * nb);
+int register_module_notifier(struct notifier_block *nb);
+int unregister_module_notifier(struct notifier_block *nb);
 
 extern void print_modules(void);
 
@@ -584,8 +582,8 @@ static inline bool is_module_text_address(unsigned long addr)
 
 /* Get/put a kernel symbol (calls should be symmetric) */
 #define symbol_get(x) ({ extern typeof(x) x __attribute__((weak)); &(x); })
-#define symbol_put(x) do { } while(0)
-#define symbol_put_addr(x) do { } while(0)
+#define symbol_put(x) do { } while (0)
+#define symbol_put_addr(x) do { } while (0)
 
 static inline void __module_get(struct module *module)
 {
@@ -642,13 +640,13 @@ static inline int module_kallsyms_on_each_symbol(int (*fn)(void *, const char *,
 	return 0;
 }
 
-static inline int register_module_notifier(struct notifier_block * nb)
+static inline int register_module_notifier(struct notifier_block *nb)
 {
 	/* no events will happen anyway, so this can always succeed */
 	return 0;
 }
 
-static inline int unregister_module_notifier(struct notifier_block * nb)
+static inline int unregister_module_notifier(struct notifier_block *nb)
 {
 	return 0;
 }

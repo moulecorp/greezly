@@ -23,24 +23,22 @@
 
 /**
  * as10x_cmd_add_PID_filter - send add filter command to AS10x
- * @phandle:   pointer to AS10x handle
+ * @adap:      pointer to AS10x bus adapter
  * @filter:    TSFilter filter for DVB-T
  *
  * Return 0 on success or negative value in case of error.
  */
-int as10x_cmd_add_PID_filter(as10x_handle_t *phandle,
+int as10x_cmd_add_PID_filter(struct as10x_bus_adapter_t *adap,
 			     struct as10x_ts_filter *filter)
 {
 	int error;
 	struct as10x_cmd_t *pcmd, *prsp;
 
-	ENTER();
-
-	pcmd = phandle->cmd;
-	prsp = phandle->rsp;
+	pcmd = adap->cmd;
+	prsp = adap->rsp;
 
 	/* prepare command */
-	as10x_cmd_build(pcmd, (++phandle->cmd_xid),
+	as10x_cmd_build(pcmd, (++adap->cmd_xid),
 			sizeof(pcmd->body.add_pid_filter.req));
 
 	/* fill command */
@@ -55,8 +53,8 @@ int as10x_cmd_add_PID_filter(as10x_handle_t *phandle,
 		pcmd->body.add_pid_filter.req.idx = 0xFF;
 
 	/* send command */
-	if (phandle->ops->xfer_cmd) {
-		error = phandle->ops->xfer_cmd(phandle, (uint8_t *) pcmd,
+	if (adap->ops->xfer_cmd) {
+		error = adap->ops->xfer_cmd(adap, (uint8_t *) pcmd,
 				sizeof(pcmd->body.add_pid_filter.req)
 				+ HEADER_SIZE, (uint8_t *) prsp,
 				sizeof(prsp->body.add_pid_filter.rsp)
@@ -77,30 +75,27 @@ int as10x_cmd_add_PID_filter(as10x_handle_t *phandle,
 	}
 
 out:
-	LEAVE();
 	return error;
 }
 
 /**
  * as10x_cmd_del_PID_filter - Send delete filter command to AS10x
- * @phandle:      pointer to AS10x handle
+ * @adap:         pointer to AS10x bus adapte
  * @pid_value:    PID to delete
  *
  * Return 0 on success or negative value in case of error.
  */
-int as10x_cmd_del_PID_filter(as10x_handle_t *phandle,
+int as10x_cmd_del_PID_filter(struct as10x_bus_adapter_t *adap,
 			     uint16_t pid_value)
 {
 	int error;
 	struct as10x_cmd_t *pcmd, *prsp;
 
-	ENTER();
-
-	pcmd = phandle->cmd;
-	prsp = phandle->rsp;
+	pcmd = adap->cmd;
+	prsp = adap->rsp;
 
 	/* prepare command */
-	as10x_cmd_build(pcmd, (++phandle->cmd_xid),
+	as10x_cmd_build(pcmd, (++adap->cmd_xid),
 			sizeof(pcmd->body.del_pid_filter.req));
 
 	/* fill command */
@@ -109,8 +104,8 @@ int as10x_cmd_del_PID_filter(as10x_handle_t *phandle,
 	pcmd->body.del_pid_filter.req.pid = cpu_to_le16(pid_value);
 
 	/* send command */
-	if (phandle->ops->xfer_cmd) {
-		error = phandle->ops->xfer_cmd(phandle, (uint8_t *) pcmd,
+	if (adap->ops->xfer_cmd) {
+		error = adap->ops->xfer_cmd(adap, (uint8_t *) pcmd,
 				sizeof(pcmd->body.del_pid_filter.req)
 				+ HEADER_SIZE, (uint8_t *) prsp,
 				sizeof(prsp->body.del_pid_filter.rsp)
@@ -126,28 +121,25 @@ int as10x_cmd_del_PID_filter(as10x_handle_t *phandle,
 	error = as10x_rsp_parse(prsp, CONTROL_PROC_REMOVEFILTER_RSP);
 
 out:
-	LEAVE();
 	return error;
 }
 
 /**
  * as10x_cmd_start_streaming - Send start streaming command to AS10x
- * @phandle:   pointer to AS10x handle
+ * @adap:   pointer to AS10x bus adapter
  *
  * Return 0 on success or negative value in case of error.
  */
-int as10x_cmd_start_streaming(as10x_handle_t *phandle)
+int as10x_cmd_start_streaming(struct as10x_bus_adapter_t *adap)
 {
 	int error;
 	struct as10x_cmd_t *pcmd, *prsp;
 
-	ENTER();
-
-	pcmd = phandle->cmd;
-	prsp = phandle->rsp;
+	pcmd = adap->cmd;
+	prsp = adap->rsp;
 
 	/* prepare command */
-	as10x_cmd_build(pcmd, (++phandle->cmd_xid),
+	as10x_cmd_build(pcmd, (++adap->cmd_xid),
 			sizeof(pcmd->body.start_streaming.req));
 
 	/* fill command */
@@ -155,8 +147,8 @@ int as10x_cmd_start_streaming(as10x_handle_t *phandle)
 		cpu_to_le16(CONTROL_PROC_START_STREAMING);
 
 	/* send command */
-	if (phandle->ops->xfer_cmd) {
-		error = phandle->ops->xfer_cmd(phandle, (uint8_t *) pcmd,
+	if (adap->ops->xfer_cmd) {
+		error = adap->ops->xfer_cmd(adap, (uint8_t *) pcmd,
 				sizeof(pcmd->body.start_streaming.req)
 				+ HEADER_SIZE, (uint8_t *) prsp,
 				sizeof(prsp->body.start_streaming.rsp)
@@ -172,28 +164,25 @@ int as10x_cmd_start_streaming(as10x_handle_t *phandle)
 	error = as10x_rsp_parse(prsp, CONTROL_PROC_START_STREAMING_RSP);
 
 out:
-	LEAVE();
 	return error;
 }
 
 /**
  * as10x_cmd_stop_streaming - Send stop streaming command to AS10x
- * @phandle:   pointer to AS10x handle
+ * @adap:   pointer to AS10x bus adapter
  *
  * Return 0 on success or negative value in case of error.
  */
-int as10x_cmd_stop_streaming(as10x_handle_t *phandle)
+int as10x_cmd_stop_streaming(struct as10x_bus_adapter_t *adap)
 {
 	int8_t error;
 	struct as10x_cmd_t *pcmd, *prsp;
 
-	ENTER();
-
-	pcmd = phandle->cmd;
-	prsp = phandle->rsp;
+	pcmd = adap->cmd;
+	prsp = adap->rsp;
 
 	/* prepare command */
-	as10x_cmd_build(pcmd, (++phandle->cmd_xid),
+	as10x_cmd_build(pcmd, (++adap->cmd_xid),
 			sizeof(pcmd->body.stop_streaming.req));
 
 	/* fill command */
@@ -201,8 +190,8 @@ int as10x_cmd_stop_streaming(as10x_handle_t *phandle)
 		cpu_to_le16(CONTROL_PROC_STOP_STREAMING);
 
 	/* send command */
-	if (phandle->ops->xfer_cmd) {
-		error = phandle->ops->xfer_cmd(phandle, (uint8_t *) pcmd,
+	if (adap->ops->xfer_cmd) {
+		error = adap->ops->xfer_cmd(adap, (uint8_t *) pcmd,
 				sizeof(pcmd->body.stop_streaming.req)
 				+ HEADER_SIZE, (uint8_t *) prsp,
 				sizeof(prsp->body.stop_streaming.rsp)
@@ -218,6 +207,5 @@ int as10x_cmd_stop_streaming(as10x_handle_t *phandle)
 	error = as10x_rsp_parse(prsp, CONTROL_PROC_STOP_STREAMING_RSP);
 
 out:
-	LEAVE();
 	return error;
 }

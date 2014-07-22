@@ -4,7 +4,7 @@
  * s390 implementation of the AES Cipher Algorithm.
  *
  * s390 Version:
- *   Copyright IBM Corp. 2005,2007
+ *   Copyright IBM Corp. 2005, 2007
  *   Author(s): Jan Glauber (jang@de.ibm.com)
  *		Sebastian Siewior (sebastian@breakpoint.cc> SW-Fallback
  *
@@ -216,7 +216,6 @@ static struct crypto_alg aes_alg = {
 	.cra_blocksize		=	AES_BLOCK_SIZE,
 	.cra_ctxsize		=	sizeof(struct s390_aes_ctx),
 	.cra_module		=	THIS_MODULE,
-	.cra_list		=	LIST_HEAD_INIT(aes_alg.cra_list),
 	.cra_init               =       fallback_init_cip,
 	.cra_exit               =       fallback_exit_cip,
 	.cra_u			=	{
@@ -399,7 +398,6 @@ static struct crypto_alg ecb_aes_alg = {
 	.cra_ctxsize		=	sizeof(struct s390_aes_ctx),
 	.cra_type		=	&crypto_blkcipher_type,
 	.cra_module		=	THIS_MODULE,
-	.cra_list		=	LIST_HEAD_INIT(ecb_aes_alg.cra_list),
 	.cra_init		=	fallback_init_blk,
 	.cra_exit		=	fallback_exit_blk,
 	.cra_u			=	{
@@ -516,7 +514,6 @@ static struct crypto_alg cbc_aes_alg = {
 	.cra_ctxsize		=	sizeof(struct s390_aes_ctx),
 	.cra_type		=	&crypto_blkcipher_type,
 	.cra_module		=	THIS_MODULE,
-	.cra_list		=	LIST_HEAD_INIT(cbc_aes_alg.cra_list),
 	.cra_init		=	fallback_init_blk,
 	.cra_exit		=	fallback_exit_blk,
 	.cra_u			=	{
@@ -724,7 +721,6 @@ static struct crypto_alg xts_aes_alg = {
 	.cra_ctxsize		=	sizeof(struct s390_xts_ctx),
 	.cra_type		=	&crypto_blkcipher_type,
 	.cra_module		=	THIS_MODULE,
-	.cra_list		=	LIST_HEAD_INIT(xts_aes_alg.cra_list),
 	.cra_init		=	xts_fallback_init,
 	.cra_exit		=	xts_fallback_exit,
 	.cra_u			=	{
@@ -738,6 +734,8 @@ static struct crypto_alg xts_aes_alg = {
 		}
 	}
 };
+
+static int xts_aes_alg_reg;
 
 static int ctr_aes_set_key(struct crypto_tfm *tfm, const u8 *in_key,
 			   unsigned int key_len)
@@ -822,6 +820,9 @@ static int ctr_aes_crypt(struct blkcipher_desc *desc, long func,
 		else
 			memcpy(walk->iv, ctrptr, AES_BLOCK_SIZE);
 		spin_unlock(&ctrblk_lock);
+	} else {
+		if (!nbytes)
+			memcpy(walk->iv, ctrptr, AES_BLOCK_SIZE);
 	}
 	/*
 	 * final block may be < AES_BLOCK_SIZE, copy only nbytes
@@ -873,7 +874,6 @@ static struct crypto_alg ctr_aes_alg = {
 	.cra_ctxsize		=	sizeof(struct s390_aes_ctx),
 	.cra_type		=	&crypto_blkcipher_type,
 	.cra_module		=	THIS_MODULE,
-	.cra_list		=	LIST_HEAD_INIT(ctr_aes_alg.cra_list),
 	.cra_u			=	{
 		.blkcipher = {
 			.min_keysize		=	AES_MIN_KEY_SIZE,
@@ -885,6 +885,8 @@ static struct crypto_alg ctr_aes_alg = {
 		}
 	}
 };
+
+static int ctr_aes_alg_reg;
 
 static int __init aes_s390_init(void)
 {
@@ -924,6 +926,7 @@ static int __init aes_s390_init(void)
 		ret = crypto_register_alg(&xts_aes_alg);
 		if (ret)
 			goto xts_aes_err;
+		xts_aes_alg_reg = 1;
 	}
 
 	if (crypt_s390_func_available(KMCTR_AES_128_ENCRYPT,
@@ -942,6 +945,7 @@ static int __init aes_s390_init(void)
 			free_page((unsigned long) ctrblk);
 			goto ctr_aes_err;
 		}
+		ctr_aes_alg_reg = 1;
 	}
 
 out:
@@ -961,9 +965,12 @@ aes_err:
 
 static void __exit aes_s390_fini(void)
 {
-	crypto_unregister_alg(&ctr_aes_alg);
-	free_page((unsigned long) ctrblk);
-	crypto_unregister_alg(&xts_aes_alg);
+	if (ctr_aes_alg_reg) {
+		crypto_unregister_alg(&ctr_aes_alg);
+		free_page((unsigned long) ctrblk);
+	}
+	if (xts_aes_alg_reg)
+		crypto_unregister_alg(&xts_aes_alg);
 	crypto_unregister_alg(&cbc_aes_alg);
 	crypto_unregister_alg(&ecb_aes_alg);
 	crypto_unregister_alg(&aes_alg);

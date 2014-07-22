@@ -42,30 +42,43 @@ static struct usb_device_id as102_usb_id_table[] = {
 	{ USB_DEVICE(PCTV_74E_USB_VID, PCTV_74E_USB_PID) },
 	{ USB_DEVICE(ELGATO_EYETV_DTT_USB_VID, ELGATO_EYETV_DTT_USB_PID) },
 	{ USB_DEVICE(NBOX_DVBT_DONGLE_USB_VID, NBOX_DVBT_DONGLE_USB_PID) },
+	{ USB_DEVICE(SKY_IT_DIGITAL_KEY_USB_VID, SKY_IT_DIGITAL_KEY_USB_PID) },
 	{ } /* Terminating entry */
 };
 
 /* Note that this table must always have the same number of entries as the
    as102_usb_id_table struct */
-static const char *as102_device_names[] = {
+static const char * const as102_device_names[] = {
 	AS102_REFERENCE_DESIGN,
 	AS102_PCTV_74E,
 	AS102_ELGATO_EYETV_DTT_NAME,
 	AS102_NBOX_DVBT_DONGLE_NAME,
+	AS102_SKY_IT_DIGITAL_KEY_NAME,
 	NULL /* Terminating entry */
 };
 
+/* eLNA configuration: devices built on the reference design work best
+   with 0xA0, while custom designs seem to require 0xC0 */
+static uint8_t const as102_elna_cfg[] = {
+	0xA0,
+	0xC0,
+	0xC0,
+	0xA0,
+	0xA0,
+	0x00 /* Terminating entry */
+};
+
 struct usb_driver as102_usb_driver = {
-	.name       =  DRIVER_FULL_NAME,
-	.probe      =  as102_usb_probe,
-	.disconnect =  as102_usb_disconnect,
-	.id_table   =  as102_usb_id_table
+	.name		= DRIVER_FULL_NAME,
+	.probe		= as102_usb_probe,
+	.disconnect	= as102_usb_disconnect,
+	.id_table	= as102_usb_id_table
 };
 
 static const struct file_operations as102_dev_fops = {
-	.owner   = THIS_MODULE,
-	.open    = as102_open,
-	.release = as102_release,
+	.owner		= THIS_MODULE,
+	.open		= as102_open,
+	.release	= as102_release,
 };
 
 static struct usb_class_driver as102_usb_class_driver = {
@@ -74,12 +87,11 @@ static struct usb_class_driver as102_usb_class_driver = {
 	.minor_base	= AS102_DEVICE_MAJOR,
 };
 
-static int as102_usb_xfer_cmd(struct as102_bus_adapter_t *bus_adap,
+static int as102_usb_xfer_cmd(struct as10x_bus_adapter_t *bus_adap,
 			      unsigned char *send_buf, int send_buf_len,
 			      unsigned char *recv_buf, int recv_buf_len)
 {
 	int ret = 0;
-	ENTER();
 
 	if (send_buf != NULL) {
 		ret = usb_control_msg(bus_adap->usb_dev,
@@ -127,11 +139,10 @@ static int as102_usb_xfer_cmd(struct as102_bus_adapter_t *bus_adap,
 #endif
 	}
 
-	LEAVE();
 	return ret;
 }
 
-static int as102_send_ep1(struct as102_bus_adapter_t *bus_adap,
+static int as102_send_ep1(struct as10x_bus_adapter_t *bus_adap,
 			  unsigned char *send_buf,
 			  int send_buf_len,
 			  int swap32)
@@ -154,7 +165,7 @@ static int as102_send_ep1(struct as102_bus_adapter_t *bus_adap,
 	return ret ? ret : actual_len;
 }
 
-static int as102_read_ep2(struct as102_bus_adapter_t *bus_adap,
+static int as102_read_ep2(struct as10x_bus_adapter_t *bus_adap,
 		   unsigned char *recv_buf, int recv_buf_len)
 {
 	int ret = 0, actual_len;
@@ -178,7 +189,7 @@ static int as102_read_ep2(struct as102_bus_adapter_t *bus_adap,
 	return ret ? ret : actual_len;
 }
 
-struct as102_priv_ops_t as102_priv_ops = {
+static struct as102_priv_ops_t as102_priv_ops = {
 	.upload_fw_pkt	= as102_send_ep1,
 	.xfer_cmd	= as102_usb_xfer_cmd,
 	.as102_read_ep2	= as102_read_ep2,
@@ -227,8 +238,6 @@ static void as102_free_usb_stream_buffer(struct as102_dev_t *dev)
 {
 	int i;
 
-	ENTER();
-
 	for (i = 0; i < MAX_STREAM_URB; i++)
 		usb_free_urb(dev->stream_urb[i]);
 
@@ -236,14 +245,11 @@ static void as102_free_usb_stream_buffer(struct as102_dev_t *dev)
 			MAX_STREAM_URB * AS102_USB_BUF_SIZE,
 			dev->stream,
 			dev->dma_addr);
-	LEAVE();
 }
 
 static int as102_alloc_usb_stream_buffer(struct as102_dev_t *dev)
 {
 	int i, ret = 0;
-
-	ENTER();
 
 	dev->stream = usb_alloc_coherent(dev->bus_adap.usb_dev,
 				       MAX_STREAM_URB * AS102_USB_BUF_SIZE,
@@ -268,11 +274,12 @@ static int as102_alloc_usb_stream_buffer(struct as102_dev_t *dev)
 		}
 
 		urb->transfer_buffer = dev->stream + (i * AS102_USB_BUF_SIZE);
+		urb->transfer_dma = dev->dma_addr + (i * AS102_USB_BUF_SIZE);
+		urb->transfer_flags = URB_NO_TRANSFER_DMA_MAP;
 		urb->transfer_buffer_length = AS102_USB_BUF_SIZE;
 
 		dev->stream_urb[i] = urb;
 	}
-	LEAVE();
 	return ret;
 }
 
@@ -303,22 +310,16 @@ static void as102_usb_release(struct kref *kref)
 {
 	struct as102_dev_t *as102_dev;
 
-	ENTER();
-
 	as102_dev = container_of(kref, struct as102_dev_t, kref);
 	if (as102_dev != NULL) {
 		usb_put_dev(as102_dev->bus_adap.usb_dev);
 		kfree(as102_dev);
 	}
-
-	LEAVE();
 }
 
 static void as102_usb_disconnect(struct usb_interface *intf)
 {
 	struct as102_dev_t *as102_dev;
-
-	ENTER();
 
 	/* extract as102_dev_t from usb_device private data */
 	as102_dev = usb_get_intfdata(intf);
@@ -337,9 +338,7 @@ static void as102_usb_disconnect(struct usb_interface *intf)
 	/* decrement usage counter */
 	kref_put(&as102_dev->kref, as102_usb_release);
 
-	printk(KERN_INFO "%s: device has been disconnected\n", DRIVER_NAME);
-
-	LEAVE();
+	pr_info("%s: device has been disconnected\n", DRIVER_NAME);
 }
 
 static int as102_usb_probe(struct usb_interface *intf,
@@ -349,26 +348,23 @@ static int as102_usb_probe(struct usb_interface *intf,
 	struct as102_dev_t *as102_dev;
 	int i;
 
-	ENTER();
-
-	as102_dev = kzalloc(sizeof(struct as102_dev_t), GFP_KERNEL);
-	if (as102_dev == NULL) {
-		err("%s: kzalloc failed", __func__);
-		return -ENOMEM;
-	}
-
 	/* This should never actually happen */
-	if ((sizeof(as102_usb_id_table) / sizeof(struct usb_device_id)) !=
+	if (ARRAY_SIZE(as102_usb_id_table) !=
 	    (sizeof(as102_device_names) / sizeof(const char *))) {
-		printk(KERN_ERR "Device names table invalid size");
+		pr_err("Device names table invalid size");
 		return -EINVAL;
 	}
 
+	as102_dev = kzalloc(sizeof(struct as102_dev_t), GFP_KERNEL);
+	if (as102_dev == NULL)
+		return -ENOMEM;
+
 	/* Assign the user-friendly device name */
-	for (i = 0; i < (sizeof(as102_usb_id_table) /
-			 sizeof(struct usb_device_id)); i++) {
-		if (id == &as102_usb_id_table[i])
+	for (i = 0; i < ARRAY_SIZE(as102_usb_id_table); i++) {
+		if (id == &as102_usb_id_table[i]) {
 			as102_dev->name = as102_device_names[i];
+			as102_dev->elna_cfg = as102_elna_cfg[i];
+		}
 	}
 
 	if (as102_dev->name == NULL)
@@ -394,25 +390,32 @@ static int as102_usb_probe(struct usb_interface *intf,
 	ret = usb_register_dev(intf, &as102_usb_class_driver);
 	if (ret < 0) {
 		/* something prevented us from registering this driver */
-		err("%s: usb_register_dev() failed (errno = %d)",
-		    __func__, ret);
+		dev_err(&intf->dev,
+			"%s: usb_register_dev() failed (errno = %d)\n",
+			__func__, ret);
 		goto failed;
 	}
 
-	printk(KERN_INFO "%s: device has been detected\n", DRIVER_NAME);
+	pr_info("%s: device has been detected\n", DRIVER_NAME);
 
 	/* request buffer allocation for streaming */
 	ret = as102_alloc_usb_stream_buffer(as102_dev);
 	if (ret != 0)
-		goto failed;
+		goto failed_stream;
 
 	/* register dvb layer */
 	ret = as102_dvb_register(as102_dev);
+	if (ret != 0)
+		goto failed_dvb;
 
-	LEAVE();
 	return ret;
 
+failed_dvb:
+	as102_free_usb_stream_buffer(as102_dev);
+failed_stream:
+	usb_deregister_dev(intf, &as102_usb_class_driver);
 failed:
+	usb_put_dev(as102_dev->bus_adap.usb_dev);
 	usb_set_intfdata(intf, NULL);
 	kfree(as102_dev);
 	return ret;
@@ -424,16 +427,14 @@ static int as102_open(struct inode *inode, struct file *file)
 	struct usb_interface *intf = NULL;
 	struct as102_dev_t *dev = NULL;
 
-	ENTER();
-
 	/* read minor from inode */
 	minor = iminor(inode);
 
 	/* fetch device from usb interface */
 	intf = usb_find_interface(&as102_usb_driver, minor);
 	if (intf == NULL) {
-		printk(KERN_ERR "%s: can't find device for minor %d\n",
-				__func__, minor);
+		pr_err("%s: can't find device for minor %d\n",
+		       __func__, minor);
 		ret = -ENODEV;
 		goto exit;
 	}
@@ -452,7 +453,6 @@ static int as102_open(struct inode *inode, struct file *file)
 	kref_get(&dev->kref);
 
 exit:
-	LEAVE();
 	return ret;
 }
 
@@ -461,18 +461,13 @@ static int as102_release(struct inode *inode, struct file *file)
 	int ret = 0;
 	struct as102_dev_t *dev = NULL;
 
-	ENTER();
-
 	dev = file->private_data;
 	if (dev != NULL) {
 		/* decrement the count on our device */
 		kref_put(&dev->kref, as102_usb_release);
 	}
 
-	LEAVE();
 	return ret;
 }
 
 MODULE_DEVICE_TABLE(usb, as102_usb_id_table);
-
-/* EOF - vim: set textwidth=80 ts=8 sw=8 sts=8 noet: */

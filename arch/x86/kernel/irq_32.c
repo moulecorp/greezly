@@ -31,6 +31,8 @@ EXPORT_PER_CPU_SYMBOL(irq_regs);
 
 extern void gr_handle_kernel_exploit(void);
 
+int sysctl_panic_on_stackoverflow __read_mostly;
+
 /* Debugging check for stack overflow: is there less than 1KB free? */
 static int check_stack_overflow(void)
 {
@@ -47,6 +49,8 @@ static void print_stack_overflow(void)
 	printk(KERN_WARNING "low stack detected by irq handler\n");
 	dump_stack();
 	gr_handle_kernel_exploit();
+	if (sysctl_panic_on_stackoverflow)
+		panic("low stack detected by irq handler - check messages\n");
 }
 
 #else
@@ -122,53 +126,36 @@ execute_on_irq_stack(int overflow, struct irq_desc *desc, int irq)
 /*
  * allocate per-cpu stacks for hardirq and for softirq processing
  */
-void __cpuinit irq_ctx_init(int cpu)
+void irq_ctx_init(int cpu)
 {
 	if (per_cpu(hardirq_ctx, cpu))
 		return;
 
-	per_cpu(hardirq_ctx, cpu) = page_address(alloc_pages_node(cpu_to_node(cpu), THREAD_FLAGS, THREAD_ORDER));
-	per_cpu(softirq_ctx, cpu) = page_address(alloc_pages_node(cpu_to_node(cpu), THREAD_FLAGS, THREAD_ORDER));
-
-	printk(KERN_DEBUG "CPU %u irqstacks, hard=%p soft=%p\n",
-	       cpu, per_cpu(hardirq_ctx, cpu),  per_cpu(softirq_ctx, cpu));
+	per_cpu(hardirq_ctx, cpu) = page_address(alloc_pages_node(cpu_to_node(cpu), THREADINFO_GFP, THREAD_SIZE_ORDER));
+	per_cpu(softirq_ctx, cpu) = page_address(alloc_pages_node(cpu_to_node(cpu), THREADINFO_GFP, THREAD_SIZE_ORDER));
 }
 
-asmlinkage void do_softirq(void)
+void do_softirq_own_stack(void)
 {
-	unsigned long flags;
 	union irq_ctx *irqctx;
 	u32 *isp;
 
-	if (in_interrupt())
-		return;
+	irqctx = __this_cpu_read(softirq_ctx);
+	irqctx->previous_esp = current_stack_pointer;
 
-	local_irq_save(flags);
-
-	if (local_softirq_pending()) {
-		irqctx = __this_cpu_read(softirq_ctx);
-		irqctx->previous_esp = current_stack_pointer;
-
-		/* build the stack frame on the softirq stack */
-		isp = (u32 *) ((char *)irqctx + sizeof(*irqctx) - 8);
+	/* build the stack frame on the softirq stack */
+	isp = (u32 *) ((char *)irqctx + sizeof(*irqctx) - 8);
 
 #ifdef CONFIG_PAX_MEMORY_UDEREF
-		__set_fs(MAKE_MM_SEG(0));
+	__set_fs(MAKE_MM_SEG(0));
 #endif
 
-		call_on_stack(__do_softirq, isp);
+	call_on_stack(__do_softirq, isp);
 
 #ifdef CONFIG_PAX_MEMORY_UDEREF
-		__set_fs(current_thread_info()->addr_limit);
+	__set_fs(current_thread_info()->addr_limit);
 #endif
 
-		/*
-		 * Shouldn't happen, we returned above if in_interrupt():
-		 */
-		WARN_ON_ONCE(softirq_count());
-	}
-
-	local_irq_restore(flags);
 }
 
 bool handle_irq(unsigned irq, struct pt_regs *regs)
@@ -182,7 +169,7 @@ bool handle_irq(unsigned irq, struct pt_regs *regs)
 	if (unlikely(!desc))
 		return false;
 
-	if (!execute_on_irq_stack(overflow, desc, irq)) {
+	if (user_mode(regs) || !execute_on_irq_stack(overflow, desc, irq)) {
 		if (unlikely(overflow))
 			print_stack_overflow();
 		desc->handle_irq(irq, desc);

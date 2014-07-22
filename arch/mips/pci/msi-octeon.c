@@ -150,6 +150,7 @@ msi_irq_allocated:
 		msg.address_lo =
 			((128ul << 20) + CVMX_PCI_MSI_RCV) & 0xffffffff;
 		msg.address_hi = ((128ul << 20) + CVMX_PCI_MSI_RCV) >> 32;
+		break;
 	case OCTEON_DMA_BAR_TYPE_BIG:
 		/* When using big bar, Bar 0 is based at 0 */
 		msg.address_lo = (0 + CVMX_PCI_MSI_RCV) & 0xffffffff;
@@ -162,7 +163,7 @@ msi_irq_allocated:
 		msg.address_hi = (0 + CVMX_NPEI_PCIE_MSI_RCV) >> 32;
 		break;
 	default:
-		panic("arch_setup_msi_irq: Invalid octeon_dma_bar_type\n");
+		panic("arch_setup_msi_irq: Invalid octeon_dma_bar_type");
 	}
 	msg.data = irq - OCTEON_IRQ_MSI_BIT0;
 

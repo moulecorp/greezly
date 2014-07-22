@@ -19,12 +19,19 @@
 #include <net/af_rxrpc.h>
 #include "ar-internal.h"
 
-static unsigned rxrpc_ack_defer = 1;
+static unsigned int rxrpc_ack_defer = 1;
 
-static const char *const rxrpc_acks[] = {
-	"---", "REQ", "DUP", "OOS", "WIN", "MEM", "PNG", "PNR", "DLY", "IDL",
-	"-?-"
-};
+static const char *rxrpc_acks(u8 reason)
+{
+	static const char *const str[] = {
+		"---", "REQ", "DUP", "OOS", "WIN", "MEM", "PNG", "PNR", "DLY",
+		"IDL", "-?-"
+	};
+
+	if (reason >= ARRAY_SIZE(str))
+		reason = ARRAY_SIZE(str) - 1;
+	return str[reason];
+}
 
 static const s8 rxrpc_ack_priority[] = {
 	[0]				= 0,
@@ -50,7 +57,7 @@ void __rxrpc_propose_ACK(struct rxrpc_call *call, u8 ack_reason,
 	ASSERTCMP(prior, >, 0);
 
 	_enter("{%d},%s,%%%x,%u",
-	       call->debug_id, rxrpc_acks[ack_reason], ntohl(serial),
+	       call->debug_id, rxrpc_acks(ack_reason), ntohl(serial),
 	       immediate);
 
 	if (prior < rxrpc_ack_priority[call->ackr_reason]) {
@@ -195,7 +202,7 @@ static void rxrpc_resend(struct rxrpc_call *call)
 		sp = rxrpc_skb(txb);
 
 		if (sp->need_resend) {
-			sp->need_resend = 0;
+			sp->need_resend = false;
 
 			/* each Tx packet has a new serial number */
 			sp->hdr.serial =
@@ -216,7 +223,7 @@ static void rxrpc_resend(struct rxrpc_call *call)
 		}
 
 		if (time_after_eq(jiffies + 1, sp->resend_at)) {
-			sp->need_resend = 1;
+			sp->need_resend = true;
 			resend |= 1;
 		} else if (resend & 2) {
 			if (time_before(sp->resend_at, resend_at))
@@ -265,7 +272,7 @@ static void rxrpc_resend_timer(struct rxrpc_call *call)
 		if (sp->need_resend) {
 			;
 		} else if (time_after_eq(jiffies + 1, sp->resend_at)) {
-			sp->need_resend = 1;
+			sp->need_resend = true;
 			resend |= 1;
 		} else if (resend & 2) {
 			if (time_before(sp->resend_at, resend_at))
@@ -314,11 +321,11 @@ static int rxrpc_process_soft_ACKs(struct rxrpc_call *call,
 
 		switch (sacks[loop]) {
 		case RXRPC_ACK_TYPE_ACK:
-			sp->need_resend = 0;
+			sp->need_resend = false;
 			*p_txb |= 1;
 			break;
 		case RXRPC_ACK_TYPE_NACK:
-			sp->need_resend = 1;
+			sp->need_resend = true;
 			*p_txb &= ~1;
 			resend = 1;
 			break;
@@ -344,13 +351,13 @@ static int rxrpc_process_soft_ACKs(struct rxrpc_call *call,
 
 		if (*p_txb & 1) {
 			/* packet must have been discarded */
-			sp->need_resend = 1;
+			sp->need_resend = true;
 			*p_txb &= ~1;
 			resend |= 1;
 		} else if (sp->need_resend) {
 			;
 		} else if (time_after_eq(jiffies + 1, sp->resend_at)) {
-			sp->need_resend = 1;
+			sp->need_resend = true;
 			resend |= 1;
 		} else if (resend & 2) {
 			if (time_before(sp->resend_at, resend_at))
@@ -548,11 +555,11 @@ static void rxrpc_zap_tx_window(struct rxrpc_call *call)
  * process the extra information that may be appended to an ACK packet
  */
 static void rxrpc_extract_ackinfo(struct rxrpc_call *call, struct sk_buff *skb,
-				  unsigned latest, int nAcks)
+				  unsigned int latest, int nAcks)
 {
 	struct rxrpc_ackinfo ackinfo;
 	struct rxrpc_peer *peer;
-	unsigned mtu;
+	unsigned int mtu;
 
 	if (skb_copy_bits(skb, nAcks + 3, &ackinfo, sizeof(ackinfo)) < 0) {
 		_leave(" [no ackinfo]");
@@ -637,7 +644,7 @@ process_further:
 		       hard,
 		       ntohl(ack.previousPacket),
 		       ntohl(ack.serial),
-		       rxrpc_acks[ack.reason],
+		       rxrpc_acks(ack.reason),
 		       ack.nAcks);
 
 		rxrpc_extract_ackinfo(call, skb, latest, ack.nAcks);
@@ -1180,7 +1187,7 @@ send_ACK:
 	       ntohl(ack.firstPacket),
 	       ntohl(ack.previousPacket),
 	       ntohl(ack.serial),
-	       rxrpc_acks[ack.reason],
+	       rxrpc_acks(ack.reason),
 	       ack.nAcks);
 
 	del_timer_sync(&call->ack_timer);

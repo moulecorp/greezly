@@ -26,6 +26,7 @@
 #include <linux/lglock.h>
 #include <linux/hugetlb.h>
 #include <linux/posix-timers.h>
+#include "../fs/mount.h"
 
 #include <asm/uaccess.h>
 #include <asm/errno.h>
@@ -1168,7 +1169,7 @@ static int gracl_reload_apply_policies(void *reload)
 		if (!role_applied) {
 			cred = __task_cred(task);
 			rtmp = task->role;
-			task->role = __lookup_acl_role_label(polstate, task, cred->uid, cred->gid);
+			task->role = __lookup_acl_role_label(polstate, task, GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid));
 		}
 		/* this handles non-nested inherited subjects, nested subjects will still
 		   be dropped currently */
@@ -1200,7 +1201,7 @@ static int gracl_reload_apply_policies(void *reload)
 			}
 			if (!role_applied) {
 				cred = __task_cred(task);
-				task->role = __lookup_acl_role_label(polstate, task, cred->uid, cred->gid);
+				task->role = __lookup_acl_role_label(polstate, task, GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid));
 			}
 			/* this handles non-nested inherited subjects, nested subjects will still
 			   be dropped currently */
@@ -1542,7 +1543,7 @@ write_grsec_handler(struct file *file, const char __user * buf, size_t count, lo
 
 	if (gr_usermode.mode != GR_SPROLE && gr_usermode.mode != GR_STATUS &&
 	    gr_usermode.mode != GR_UNSPROLE && gr_usermode.mode != GR_SPROLEPAM &&
-	    current_uid()) {
+	    gr_is_global_nonroot(current_uid())) {
 		error = -EPERM;
 		goto out;
 	}
@@ -1753,7 +1754,7 @@ gr_set_acls(const int type)
 
 		if (task->exec_file) {
 			cred = __task_cred(task);
-			task->role = __lookup_acl_role_label(polstate, task, cred->uid, cred->gid);
+			task->role = __lookup_acl_role_label(polstate, task, GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid));
 			subj = __gr_get_subject_for_task(polstate, task, NULL);
 			if (subj == NULL) {
 				ret = -EINVAL;

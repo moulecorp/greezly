@@ -72,7 +72,6 @@ GRTAGS
 GSYMS
 GTAGS
 Image
-Kerntypes
 Module.markers
 Module.symvers
 PENDING
@@ -126,6 +125,7 @@ cpustr.h
 crc32table.h*
 cscope.*
 defkeymap.c
+devicetable-offsets.h
 devlist.h*
 dnotify_test
 docproc
@@ -170,7 +170,6 @@ keywords.c
 ksym.c*
 ksym.h*
 kxgettext
-lkc_defs.h
 lex.c
 lex.*.c
 lib1funcs.S
@@ -178,13 +177,11 @@ logo_*.c
 logo_*_clut224.c
 logo_*_mono.c
 lxdialog
-mach
 mach-types
 mach-types.h
 machtypes.h
 map
 map_hugetlb
-maui_boot.h
 mconf
 mdp
 miboot*
@@ -205,11 +202,12 @@ modversions.h*
 nconf
 ncscope.*
 offset.h
-offsets.h
 oui.c*
 page-types
 parse.c
 parse.h
+parse-events*
+pasyms.h
 patches*
 pca200e.bin
 pca200e_ecd.bin2
@@ -219,6 +217,7 @@ perf-archive
 piggyback
 piggy.gzip
 piggy.S
+pmu-*
 pnmtologo
 ppc_defs.h*
 pss_boot.h
@@ -230,6 +229,8 @@ r420_reg_safe.h
 r600_reg_safe.h
 randomize_layout_hash.h
 randomize_layout_seed.h
+realmode.lds
+realmode.relocs
 recordmcount
 regdb.c
 relocs
@@ -246,6 +247,7 @@ size_overflow_hash.h
 sImage
 slabinfo
 sm_tbl*
+sortextable
 split-include
 syscalltab.h
 tables.c
@@ -267,6 +269,8 @@ vdso32.lds
 vdso32.so.dbg
 vdso64.lds
 vdso64.so.dbg
+vdsox32.lds
+vdsox32-syms.lds
 version.h*
 vmImage
 vmlinux

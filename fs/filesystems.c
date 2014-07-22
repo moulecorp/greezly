@@ -74,7 +74,6 @@ int register_filesystem(struct file_system_type * fs)
 	BUG_ON(strchr(fs->name, '.'));
 	if (fs->next)
 		return -EBUSY;
-	INIT_LIST_HEAD(&fs->fs_supers);
 	write_lock(&file_systems_lock);
 	p = find_filesystem(fs->name, strlen(fs->name));
 	if (*p)
@@ -125,7 +124,7 @@ EXPORT_SYMBOL(unregister_filesystem);
 static int fs_index(const char __user * __name)
 {
 	struct file_system_type * tmp;
-	char * name;
+	struct filename *name;
 	int err, index;
 
 	name = getname(__name);
@@ -136,7 +135,7 @@ static int fs_index(const char __user * __name)
 	err = -EINVAL;
 	read_lock(&file_systems_lock);
 	for (tmp=file_systems, index=0 ; tmp ; tmp=tmp->next, index++) {
-		if (strcmp(tmp->name,name) == 0) {
+		if (strcmp(tmp->name, name->name) == 0) {
 			err = index;
 			break;
 		}
@@ -274,7 +273,6 @@ struct file_system_type *get_fs_type(const char *name)
 	int len = dot ? dot - name : strlen(name);
 
 	fs = __get_fs_type(name, len);
-	
 #ifdef CONFIG_GRKERNSEC_MODHARDEN
 	if (!fs && (___request_module(true, "grsec_modharden_fs", "fs-%.*s", len, name) == 0))
 #else

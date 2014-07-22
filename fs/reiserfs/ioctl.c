@@ -5,7 +5,7 @@
 #include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
-#include <linux/reiserfs_fs.h>
+#include "reiserfs.h"
 #include <linux/time.h>
 #include <asm/uaccess.h>
 #include <linux/pagemap.h>
@@ -21,7 +21,7 @@
  */
 long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	struct inode *inode = filp->f_path.dentry->d_inode;
+	struct inode *inode = file_inode(filp);
 	unsigned int flags;
 	int err = 0;
 
@@ -55,7 +55,7 @@ long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				break;
 			}
 
-			err = mnt_want_write(filp->f_path.mnt);
+			err = mnt_want_write_file(filp);
 			if (err)
 				break;
 
@@ -96,7 +96,7 @@ long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			inode->i_ctime = CURRENT_TIME_SEC;
 			mark_inode_dirty(inode);
 setflags_out:
-			mnt_drop_write(filp->f_path.mnt);
+			mnt_drop_write_file(filp);
 			break;
 		}
 	case REISERFS_IOC_GETVERSION:
@@ -107,7 +107,7 @@ setflags_out:
 			err = -EPERM;
 			break;
 		}
-		err = mnt_want_write(filp->f_path.mnt);
+		err = mnt_want_write_file(filp);
 		if (err)
 			break;
 		if (get_user(inode->i_generation, (int __user *)arg)) {
@@ -117,7 +117,7 @@ setflags_out:
 		inode->i_ctime = CURRENT_TIME_SEC;
 		mark_inode_dirty(inode);
 setversion_out:
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 		break;
 	default:
 		err = -ENOTTY;
@@ -167,7 +167,6 @@ int reiserfs_commit_write(struct file *f, struct page *page,
 int reiserfs_unpack(struct inode *inode, struct file *filp)
 {
 	int retval = 0;
-	int depth;
 	int index;
 	struct page *page;
 	struct address_space *mapping;
@@ -183,10 +182,10 @@ int reiserfs_unpack(struct inode *inode, struct file *filp)
 		return 0;
 	}
 
-	depth = reiserfs_write_lock_once(inode->i_sb);
-
 	/* we need to make sure nobody is changing the file size beneath us */
 	reiserfs_mutex_lock_safe(&inode->i_mutex, inode->i_sb);
+
+	reiserfs_write_lock(inode->i_sb);
 
 	write_from = inode->i_size & (blocksize - 1);
 	/* if we are on a block boundary, we are already unpacked.  */
@@ -221,6 +220,6 @@ int reiserfs_unpack(struct inode *inode, struct file *filp)
 
       out:
 	mutex_unlock(&inode->i_mutex);
-	reiserfs_write_unlock_once(inode->i_sb, depth);
+	reiserfs_write_unlock(inode->i_sb);
 	return retval;
 }

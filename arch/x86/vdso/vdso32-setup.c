@@ -207,9 +207,9 @@ void syscall32_cpu_init(void)
 {
 	/* Load these always in case some future AMD CPU supports
 	   SYSENTER from compat mode too. */
-	checking_wrmsrl(MSR_IA32_SYSENTER_CS, (u64)__KERNEL_CS);
-	checking_wrmsrl(MSR_IA32_SYSENTER_ESP, 0ULL);
-	checking_wrmsrl(MSR_IA32_SYSENTER_EIP, (u64)ia32_sysenter_target);
+	wrmsrl_safe(MSR_IA32_SYSENTER_CS, (u64)__KERNEL_CS);
+	wrmsrl_safe(MSR_IA32_SYSENTER_ESP, 0ULL);
+	wrmsrl_safe(MSR_IA32_SYSENTER_EIP, (u64)ia32_sysenter_target);
 
 	wrmsrl(MSR_CSTAR, ia32_cstar_target);
 }
@@ -252,13 +252,7 @@ static int __init gate_vma_init(void)
 	gate_vma.vm_end = FIXADDR_USER_END;
 	gate_vma.vm_flags = VM_READ | VM_MAYREAD | VM_EXEC | VM_MAYEXEC;
 	gate_vma.vm_page_prot = vm_get_page_prot(gate_vma.vm_flags);
-	/*
-	 * Make sure the vDSO gets into every core dump.
-	 * Dumping its contents makes post-mortem fully interpretable later
-	 * without matching up the same kernel and hardware config to see
-	 * what PC values meant.
-	 */
-	gate_vma.vm_flags |= VM_ALWAYSDUMP;
+
 	return 0;
 }
 
@@ -319,6 +313,11 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	int ret = 0;
 	bool compat;
 
+#ifdef CONFIG_X86_X32_ABI
+	if (test_thread_flag(TIF_X32))
+		return x32_setup_additional_pages(bprm, uses_interp);
+#endif
+
 	if (vdso_enabled == VDSO_DISABLED)
 		return 0;
 
@@ -345,17 +344,10 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	if (compat_uses_vma || !compat) {
 		/*
 		 * MAYWRITE to allow gdb to COW and set breakpoints
-		 *
-		 * Make sure the vDSO gets into every core dump.
-		 * Dumping its contents makes post-mortem fully
-		 * interpretable later without matching up the same
-		 * kernel and hardware config to see what PC values
-		 * meant.
 		 */
 		ret = install_special_mapping(mm, addr, PAGE_SIZE,
 					      VM_READ|VM_EXEC|
-					      VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC|
-					      VM_ALWAYSDUMP,
+					      VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC,
 					      vdso32_pages);
 
 		if (ret)
@@ -382,7 +374,7 @@ subsys_initcall(sysenter_setup);
 /* Register vsyscall32 into the ABI table */
 #include <linux/sysctl.h>
 
-static ctl_table abi_table2[] = {
+static struct ctl_table abi_table2[] = {
 	{
 		.procname	= "vsyscall32",
 		.data		= &sysctl_vsyscall32,
@@ -400,7 +392,7 @@ static ctl_table abi_table2[] = {
 	{}
 };
 
-static ctl_table abi_root_table2[] = {
+static struct ctl_table abi_root_table2[] = {
 	{
 		.procname = "abi",
 		.mode = 0555,

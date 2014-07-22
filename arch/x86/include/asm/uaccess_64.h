@@ -20,18 +20,27 @@
 
 /* Handles exceptions in both to and from, but doesn't do access_ok */
 __must_check unsigned long
-copy_user_generic_string(void *to, const void *from, unsigned long len) __size_overflow(3);
+copy_user_enhanced_fast_string(void *to, const void *from, unsigned len) __size_overflow(3);
 __must_check unsigned long
-copy_user_generic_unrolled(void *to, const void *from, unsigned long len) __size_overflow(3);
+copy_user_generic_string(void *to, const void *from, unsigned len) __size_overflow(3);
+__must_check unsigned long
+copy_user_generic_unrolled(void *to, const void *from, unsigned len) __size_overflow(3);
 
 static __always_inline __must_check unsigned long
 copy_user_generic(void *to, const void *from, unsigned long len)
 {
 	unsigned ret;
 
-	alternative_call(copy_user_generic_unrolled,
+	/*
+	 * If CPU has ERMS feature, use copy_user_enhanced_fast_string.
+	 * Otherwise, if CPU has rep_good feature, use copy_user_generic_string.
+	 * Otherwise, use copy_user_generic_unrolled.
+	 */
+	alternative_call_2(copy_user_generic_unrolled,
 			 copy_user_generic_string,
 			 X86_FEATURE_REP_GOOD,
+			 copy_user_enhanced_fast_string,
+			 X86_FEATURE_ERMS,
 			 ASM_OUTPUT2("=a" (ret), "=D" (to), "=S" (from),
 				     "=d" (len)),
 			 "1" (to), "2" (from), "3" (len)
@@ -39,61 +48,14 @@ copy_user_generic(void *to, const void *from, unsigned long len)
 	return ret;
 }
 
-static __always_inline __must_check unsigned long
-__copy_to_user(void __user *to, const void *from, unsigned long len);
-static __always_inline __must_check unsigned long
-__copy_from_user(void *to, const void __user *from, unsigned long len);
 __must_check unsigned long
 copy_in_user(void __user *to, const void __user *from, unsigned long len);
 
-extern void copy_to_user_overflow(void)
-#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
-	__compiletime_error("copy_to_user() buffer size is not provably correct")
-#else
-	__compiletime_warning("copy_to_user() buffer size is not provably correct")
-#endif
-;
-
-extern void copy_from_user_overflow(void)
-#ifdef CONFIG_DEBUG_STRICT_USER_COPY_CHECKS
-	__compiletime_error("copy_from_user() buffer size is not provably correct")
-#else
-	__compiletime_warning("copy_from_user() buffer size is not provably correct")
-#endif
-;
-
-static inline unsigned long __must_check copy_from_user(void *to,
-					  const void __user *from,
-					  unsigned long n)
-{
-	might_fault();
-
-	check_object_size(to, n, false);
-
-	if (access_ok(VERIFY_READ, from, n))
-		n = __copy_from_user(to, from, n);
-	else if (n < INT_MAX)
-		memset(to, 0, n);
-	return n;
-}
-
 static __always_inline __must_check
-int copy_to_user(void __user *dst, const void *src, unsigned long size)
-{
-	might_fault();
-
-	if (access_ok(VERIFY_WRITE, dst, size))
-		size = __copy_to_user(dst, src, size);
-	return size;
-}
-
-static __always_inline __must_check
-unsigned long __copy_from_user(void *dst, const void __user *src, unsigned long size)
+unsigned long __copy_from_user_nocheck(void *dst, const void __user *src, unsigned long size)
 {
 	size_t sz = __compiletime_object_size(dst);
 	unsigned ret = 0;
-
-	might_fault();
 
 	if (size > INT_MAX)
 		return size;
@@ -106,7 +68,10 @@ unsigned long __copy_from_user(void *dst, const void __user *src, unsigned long 
 #endif
 
 	if (unlikely(sz != (size_t)-1 && sz < size)) {
-		copy_from_user_overflow();
+		 if(__builtin_constant_p(size))
+			copy_from_user_overflow();
+		else
+			__copy_from_user_overflow(sz, size);
 		return size;
 	}
 
@@ -149,12 +114,17 @@ unsigned long __copy_from_user(void *dst, const void __user *src, unsigned long 
 }
 
 static __always_inline __must_check
-unsigned long __copy_to_user(void __user *dst, const void *src, unsigned long size)
+unsigned long __copy_from_user(void *dst, const void __user *src, unsigned long size)
+{
+	might_fault();
+	return __copy_from_user_nocheck(dst, src, size);
+}
+
+static __always_inline __must_check
+unsigned long __copy_to_user_nocheck(void __user *dst, const void *src, unsigned long size)
 {
 	size_t sz = __compiletime_object_size(src);
 	unsigned ret = 0;
-
-	might_fault();
 
 	if (size > INT_MAX)
 		return size;
@@ -167,7 +137,10 @@ unsigned long __copy_to_user(void __user *dst, const void *src, unsigned long si
 #endif
 
 	if (unlikely(sz != (size_t)-1 && sz < size)) {
-		copy_to_user_overflow();
+		 if(__builtin_constant_p(size))
+			copy_to_user_overflow();
+		else
+			__copy_to_user_overflow(sz, size);
 		return size;
 	}
 
@@ -210,7 +183,14 @@ unsigned long __copy_to_user(void __user *dst, const void *src, unsigned long si
 }
 
 static __always_inline __must_check
-unsigned long __copy_in_user(void __user *dst, const void __user *src, unsigned long size)
+unsigned long __copy_to_user(void __user *dst, const void *src, unsigned long size)
+{
+	might_fault();
+	return __copy_to_user_nocheck(dst, src, size);
+}
+
+static __always_inline __must_check
+unsigned long __copy_in_user(void __user *dst, const void __user *src, unsigned size)
 {
 	unsigned ret = 0;
 
@@ -273,40 +253,25 @@ unsigned long __copy_in_user(void __user *dst, const void __user *src, unsigned 
 	}
 }
 
-__must_check long
-strncpy_from_user(char *dst, const char __user *src, long count);
-__must_check long
-__strncpy_from_user(char *dst, const char __user *src, long count);
-__must_check long strnlen_user(const char __user *str, long n);
-__must_check long __strnlen_user(const char __user *str, long n);
-__must_check long strlen_user(const char __user *str);
-__must_check unsigned long clear_user(void __user *mem, unsigned long len);
-__must_check unsigned long __clear_user(void __user *mem, unsigned long len);
-
 static __must_check __always_inline unsigned long
 __copy_from_user_inatomic(void *dst, const void __user *src, unsigned long size)
 {
-	if (size > INT_MAX)
-		return size;
-
-	return copy_user_generic(dst, (__force_kernel const void *)____m(src), size);
+	return __copy_from_user_nocheck(dst, src, size);
 }
 
 static __must_check __always_inline unsigned long
 __copy_to_user_inatomic(void __user *dst, const void *src, unsigned long size)
 {
-	if (size > INT_MAX)
-		return size;
-
-	return copy_user_generic((__force_kernel void *)____m(dst), src, size);
+	return __copy_to_user_nocheck(dst, src, size);
 }
 
 extern unsigned long __copy_user_nocache(void *dst, const void __user *src,
 				unsigned long size, int zerorest);
 
-static inline unsigned long __copy_from_user_nocache(void *dst, const void __user *src, unsigned long size)
+static inline unsigned long
+__copy_from_user_nocache(void *dst, const void __user *src, unsigned long size)
 {
-	might_sleep();
+	might_fault();
 
 	if (size > INT_MAX)
 		return size;
@@ -319,7 +284,8 @@ static inline unsigned long __copy_from_user_nocache(void *dst, const void __use
 	return __copy_user_nocache(dst, src, size, 1);
 }
 
-static inline unsigned long __copy_from_user_inatomic_nocache(void *dst, const void __user *src,
+static inline unsigned long
+__copy_from_user_inatomic_nocache(void *dst, const void __user *src,
 				  unsigned long size)
 {
 	if (size > INT_MAX)
@@ -333,7 +299,7 @@ static inline unsigned long __copy_from_user_inatomic_nocache(void *dst, const v
 	return __copy_user_nocache(dst, src, size, 0);
 }
 
-extern unsigned long
+unsigned long
 copy_user_handle_tail(char __user *to, char __user *from, unsigned long len, unsigned zerorest) __size_overflow(3);
 
 #endif /* _ASM_X86_UACCESS_64_H */

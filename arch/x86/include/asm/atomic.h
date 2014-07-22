@@ -6,6 +6,7 @@
 #include <asm/processor.h>
 #include <asm/alternative.h>
 #include <asm/cmpxchg.h>
+#include <asm/rmwcc.h>
 
 /*
  * Atomic operations that C can't guarantee us.  Useful for
@@ -143,21 +144,7 @@ static inline void atomic_sub_unchecked(int i, atomic_unchecked_t *v)
  */
 static inline int atomic_sub_and_test(int i, atomic_t *v)
 {
-	unsigned char c;
-
-	asm volatile(LOCK_PREFIX "subl %2,%0\n"
-
-#ifdef CONFIG_PAX_REFCOUNT
-		     "jno 0f\n"
-		     LOCK_PREFIX "addl %2,%0\n"
-		     "int $4\n0:\n"
-		     _ASM_EXTABLE(0b, 0b)
-#endif
-
-		     "sete %1\n"
-		     : "+m" (v->counter), "=qm" (c)
-		     : "ir" (i) : "memory");
-	return c;
+	GEN_BINARY_RMWcc(LOCK_PREFIX "subl", LOCK_PREFIX "addl",  v->counter, "er", i, "%0", "e");
 }
 
 /**
@@ -234,21 +221,7 @@ static inline void atomic_dec_unchecked(atomic_unchecked_t *v)
  */
 static inline int atomic_dec_and_test(atomic_t *v)
 {
-	unsigned char c;
-
-	asm volatile(LOCK_PREFIX "decl %0\n"
-
-#ifdef CONFIG_PAX_REFCOUNT
-		     "jno 0f\n"
-		     LOCK_PREFIX "incl %0\n"
-		     "int $4\n0:\n"
-		     _ASM_EXTABLE(0b, 0b)
-#endif
-
-		     "sete %1\n"
-		     : "+m" (v->counter), "=qm" (c)
-		     : : "memory");
-	return c != 0;
+	GEN_UNARY_RMWcc(LOCK_PREFIX "decl", LOCK_PREFIX "incl", v->counter, "%0", "e");
 }
 
 /**
@@ -261,21 +234,7 @@ static inline int atomic_dec_and_test(atomic_t *v)
  */
 static inline int atomic_inc_and_test(atomic_t *v)
 {
-	unsigned char c;
-
-	asm volatile(LOCK_PREFIX "incl %0\n"
-
-#ifdef CONFIG_PAX_REFCOUNT
-		     "jno 0f\n"
-		     LOCK_PREFIX "decl %0\n"
-		     "int $4\n0:\n"
-		     _ASM_EXTABLE(0b, 0b)
-#endif
-
-		     "sete %1\n"
-		     : "+m" (v->counter), "=qm" (c)
-		     : : "memory");
-	return c != 0;
+	GEN_UNARY_RMWcc(LOCK_PREFIX "incl", LOCK_PREFIX "decl", v->counter, "%0", "e");
 }
 
 /**
@@ -288,13 +247,7 @@ static inline int atomic_inc_and_test(atomic_t *v)
  */
 static inline int atomic_inc_and_test_unchecked(atomic_unchecked_t *v)
 {
-	unsigned char c;
-
-	asm volatile(LOCK_PREFIX "incl %0\n"
-		     "sete %1\n"
-		     : "+m" (v->counter), "=qm" (c)
-		     : : "memory");
-	return c != 0;
+	GEN_UNARY_RMWcc_unchecked(LOCK_PREFIX "incl", v->counter, "%0", "e");
 }
 
 /**
@@ -308,21 +261,7 @@ static inline int atomic_inc_and_test_unchecked(atomic_unchecked_t *v)
  */
 static inline int atomic_add_negative(int i, atomic_t *v)
 {
-	unsigned char c;
-
-	asm volatile(LOCK_PREFIX "addl %2,%0\n"
-
-#ifdef CONFIG_PAX_REFCOUNT
-		     "jno 0f\n"
-		     LOCK_PREFIX "subl %2,%0\n"
-		     "int $4\n0:\n"
-		     _ASM_EXTABLE(0b, 0b)
-#endif
-
-		     "sets %1\n"
-		     : "+m" (v->counter), "=qm" (c)
-		     : "ir" (i) : "memory");
-	return c;
+	GEN_BINARY_RMWcc(LOCK_PREFIX "addl", LOCK_PREFIX "subl", v->counter, "er", i, "%0", "s");
 }
 
 /**
@@ -334,23 +273,7 @@ static inline int atomic_add_negative(int i, atomic_t *v)
  */
 static inline int atomic_add_return(int i, atomic_t *v)
 {
-#ifdef CONFIG_M386
-	int __i;
-	unsigned long flags;
-	if (unlikely(boot_cpu_data.x86 <= 3))
-		goto no_xadd;
-#endif
-	/* Modern 486+ processor */
 	return i + xadd_check_overflow(&v->counter, i);
-
-#ifdef CONFIG_M386
-no_xadd: /* Legacy 386 processor */
-	raw_local_irq_save(flags);
-	__i = atomic_read(v);
-	atomic_set(v, i + __i);
-	raw_local_irq_restore(flags);
-	return i + __i;
-#endif
 }
 
 /**
@@ -362,23 +285,7 @@ no_xadd: /* Legacy 386 processor */
  */
 static inline int atomic_add_return_unchecked(int i, atomic_unchecked_t *v)
 {
-#ifdef CONFIG_M386
-	int __i;
-	unsigned long flags;
-	if (unlikely(boot_cpu_data.x86 <= 3))
-		goto no_xadd;
-#endif
-	/* Modern 486+ processor */
 	return i + xadd(&v->counter, i);
-
-#ifdef CONFIG_M386
-no_xadd: /* Legacy 386 processor */
-	raw_local_irq_save(flags);
-	__i = atomic_read_unchecked(v);
-	atomic_set_unchecked(v, i + __i);
-	raw_local_irq_restore(flags);
-	return i + __i;
-#endif
 }
 
 /**
@@ -429,7 +336,7 @@ static inline int atomic_xchg_unchecked(atomic_unchecked_t *v, int new)
  * Atomically adds @a to @v, so long as @v was not already @u.
  * Returns the old value of @v.
  */
-static inline int __atomic_add_unless(atomic_t *v, int a, int u)
+static inline int __intentional_overflow(-1) __atomic_add_unless(atomic_t *v, int a, int u)
 {
 	int c, old, new;
 	c = atomic_read(v);
@@ -500,29 +407,6 @@ static inline int atomic_inc_not_zero_hint(atomic_t *v, int hint)
 	return 0;
 }
 
-/*
- * atomic_dec_if_positive - decrement by 1 if old value positive
- * @v: pointer of type atomic_t
- *
- * The function returns the old value of *v minus 1, even if
- * the atomic variable, v, was not decremented.
- */
-static inline int atomic_dec_if_positive(atomic_t *v)
-{
-	int c, old, dec;
-	c = atomic_read(v);
-	for (;;) {
-		dec = c - 1;
-		if (unlikely(dec < 0))
-			break;
-		old = atomic_cmpxchg((v), c, dec);
-		if (likely(old == c))
-			break;
-		c = old;
-	}
-	return dec;
-}
-
 /**
  * atomic_inc_short - increment of a short integer
  * @v: pointer to type int
@@ -591,9 +475,9 @@ static inline void atomic_set_mask_unchecked(unsigned int mask, atomic_unchecked
 #define smp_mb__after_atomic_inc()	barrier()
 
 #ifdef CONFIG_X86_32
-# include "atomic64_32.h"
+# include <asm/atomic64_32.h>
 #else
-# include "atomic64_64.h"
+# include <asm/atomic64_64.h>
 #endif
 
 #endif /* _ASM_X86_ATOMIC_H */

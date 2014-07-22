@@ -29,7 +29,6 @@
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include <linux/init.h>
 #include <linux/pm.h>
 #include <linux/sysctl.h>
 #include <linux/jiffies.h>
@@ -125,6 +124,9 @@ void au_sleep(void)
 	case ALCHEMY_CPU_AU1550:
 	case ALCHEMY_CPU_AU1200:
 		alchemy_sleep_au1550();
+		break;
+	case ALCHEMY_CPU_AU1300:
+		alchemy_sleep_au1300();
 		break;
 	}
 

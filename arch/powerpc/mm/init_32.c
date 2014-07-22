@@ -45,7 +45,6 @@
 #include <asm/btext.h>
 #include <asm/tlb.h>
 #include <asm/sections.h>
-#include <asm/system.h>
 #include <asm/hugetlb.h>
 
 #include "mmu_decl.h"
@@ -53,7 +52,7 @@
 #if defined(CONFIG_KERNEL_START_BOOL) || defined(CONFIG_LOWMEM_SIZE_BOOL)
 /* The amount of lowmem must be within 0xF0000000 - KERNELBASE. */
 #if (CONFIG_LOWMEM_SIZE > (0xF0000000 - PAGE_OFFSET))
-#error "You must adjust CONFIG_LOWMEM_SIZE or CONFIG_START_KERNEL"
+#error "You must adjust CONFIG_LOWMEM_SIZE or CONFIG_KERNEL_START"
 #endif
 #endif
 #define MAX_LOW_MEM	CONFIG_LOWMEM_SIZE
@@ -65,6 +64,13 @@ phys_addr_t memstart_addr = (phys_addr_t)~0ull;
 EXPORT_SYMBOL(memstart_addr);
 phys_addr_t kernstart_addr;
 EXPORT_SYMBOL(kernstart_addr);
+
+#ifdef CONFIG_RELOCATABLE_PPC32
+/* Used in __va()/__pa() */
+long long virt_phys_offset;
+EXPORT_SYMBOL(virt_phys_offset);
+#endif
+
 phys_addr_t lowmem_end_addr;
 
 int boot_mapsize;
@@ -134,8 +140,7 @@ void __init MMU_init(void)
 
 	if (memblock.memory.cnt > 1) {
 #ifndef CONFIG_WII
-		memblock.memory.cnt = 1;
-		memblock_analyze();
+		memblock_enforce_memory_limit(memblock.memory.regions[0].size);
 		printk(KERN_WARNING "Only using first contiguous memory region");
 #else
 		wii_memory_fixups();
@@ -158,7 +163,6 @@ void __init MMU_init(void)
 #ifndef CONFIG_HIGHMEM
 		total_memory = total_lowmem;
 		memblock_enforce_memory_limit(total_lowmem);
-		memblock_analyze();
 #endif /* CONFIG_HIGHMEM */
 	}
 
@@ -209,7 +213,12 @@ void setup_initial_memory_limit(phys_addr_t first_memblock_base,
 	 */
 	BUG_ON(first_memblock_base != 0);
 
+#ifdef CONFIG_PIN_TLB
+	/* 8xx can only access 24MB at the moment */
+	memblock_set_current_limit(min_t(u64, first_memblock_size, 0x01800000));
+#else
 	/* 8xx can only access 8MB at the moment */
 	memblock_set_current_limit(min_t(u64, first_memblock_size, 0x00800000));
+#endif
 }
 #endif /* CONFIG_8xx */

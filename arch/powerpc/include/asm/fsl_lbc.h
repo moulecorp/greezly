@@ -238,8 +238,6 @@ struct fsl_lbc_regs {
 #define FPAR_LP_CI_SHIFT      0
 	__be32 fbcr;            /**< Flash Byte Count Register */
 #define FBCR_BC      0x00000FFF
-	u8 res11[0x8];
-	u8 res8[0xF00];
 };
 
 /*
@@ -287,13 +285,18 @@ struct fsl_lbc_ctrl {
 	/* device info */
 	struct device			*dev;
 	struct fsl_lbc_regs __iomem	*regs;
-	int				irq;
+	int				irq[2];
 	wait_queue_head_t		irq_wait;
 	spinlock_t			lock;
 	void				*nand;
 
 	/* status read from LTESR by irq handler */
 	unsigned int			irq_status;
+
+#ifdef CONFIG_SUSPEND
+	/* save regs when system go to deep-sleep */
+	struct fsl_lbc_regs		*saved_regs;
+#endif
 };
 
 extern int fsl_upm_run_pattern(struct fsl_upm *upm, void __iomem *io_base,

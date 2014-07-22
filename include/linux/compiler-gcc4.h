@@ -4,7 +4,7 @@
 
 /* GCC 4.1.[01] miscompiles __weak */
 #ifdef __KERNEL__
-# if __GNUC_MINOR__ == 1 && __GNUC_PATCHLEVEL__ <= 1
+# if GCC_VERSION >= 40100 &&  GCC_VERSION <= 40101
 #  error Your version of gcc miscompiles the __weak directive
 # endif
 #endif
@@ -13,7 +13,11 @@
 #define __must_check 		__attribute__((warn_unused_result))
 #define __compiler_offsetof(a,b) __builtin_offsetof(a,b)
 
-#if __GNUC_MINOR__ >= 3
+#if GCC_VERSION >= 40100 && GCC_VERSION < 40600
+# define __compiletime_object_size(obj) __builtin_object_size(obj, 0)
+#endif
+
+#if GCC_VERSION >= 40300
 /* Mark functions as cold. gcc will assume any path leading to a call
    to them will be unlikely.  This means a lot of manual unlikely()s
    are unnecessary now for any paths leading to the usual suspects
@@ -29,19 +33,20 @@
    the kernel context */
 #define __cold			__attribute__((__cold__))
 
-/*
- * GCC 'asm goto' miscompiles certain code sequences:
- *
- *   http://gcc.gnu.org/bugzilla/show_bug.cgi?id=58670
- *
- * Work it around via a compiler barrier quirk suggested by Jakub Jelinek.
- * Fixed in GCC 4.8.2 and later versions.
- *
- * (asm goto is automatically volatile - the naming reflects this.)
- */
-#define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
+#define __UNIQUE_ID(prefix) __PASTE(__PASTE(__UNIQUE_ID_, prefix), __COUNTER__)
 
-#if __GNUC_MINOR__ >= 5
+#ifndef __CHECKER__
+# define __compiletime_warning(message) __attribute__((warning(message)))
+# define __compiletime_error(message) __attribute__((error(message)))
+#endif /* __CHECKER__ */
+
+#define __alloc_size(...)	__attribute((alloc_size(__VA_ARGS__)))
+#define __bos(ptr, arg)		__builtin_object_size((ptr), (arg))
+#define __bos0(ptr)		__bos((ptr), 0)
+#define __bos1(ptr)		__bos((ptr), 1)
+#endif /* GCC_VERSION >= 40300 */
+
+#if GCC_VERSION >= 40500
 
 #ifdef RANDSTRUCT_PLUGIN
 #define __randomize_layout __attribute__((randomize_layout))
@@ -76,18 +81,33 @@
 /* Mark a function definition as prohibited from being cloned. */
 #define __noclone	__attribute__((__noclone__))
 
+#endif /* GCC_VERSION >= 40500 */
+
+#if GCC_VERSION >= 40600
+/*
+ * Tell the optimizer that something else uses this function or variable.
+ */
+#define __visible __attribute__((externally_visible))
 #endif
 
-#define __alloc_size(...)	__attribute((alloc_size(__VA_ARGS__)))
-#define __bos(ptr, arg)		__builtin_object_size((ptr), (arg))
-#define __bos0(ptr)		__bos((ptr), 0)
-#define __bos1(ptr)		__bos((ptr), 1)
-#endif
+/*
+ * GCC 'asm goto' miscompiles certain code sequences:
+ *
+ *   http://gcc.gnu.org/bugzilla/show_bug.cgi?id=58670
+ *
+ * Work it around via a compiler barrier quirk suggested by Jakub Jelinek.
+ * Fixed in GCC 4.8.2 and later versions.
+ *
+ * (asm goto is automatically volatile - the naming reflects this.)
+ */
+#define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
 
-#if __GNUC_MINOR__ > 0
-#define __compiletime_object_size(obj) __builtin_object_size(obj, 0)
+#ifdef CONFIG_ARCH_USE_BUILTIN_BSWAP
+#if GCC_VERSION >= 40400
+#define __HAVE_BUILTIN_BSWAP32__
+#define __HAVE_BUILTIN_BSWAP64__
 #endif
-#if __GNUC_MINOR__ >= 4 && !defined(__CHECKER__)
-#define __compiletime_warning(message) __attribute__((warning(message)))
-#define __compiletime_error(message) __attribute__((error(message)))
+#if GCC_VERSION >= 40800 || (defined(__powerpc__) && GCC_VERSION >= 40600)
+#define __HAVE_BUILTIN_BSWAP16__
 #endif
+#endif /* CONFIG_ARCH_USE_BUILTIN_BSWAP */

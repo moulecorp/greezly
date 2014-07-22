@@ -21,8 +21,6 @@
 #include <linux/ktime.h>
 #include <linux/trace_clock.h>
 
-#include "trace.h"
-
 /*
  * trace_clock_local(): the simplest and least coherent tracing clock.
  *
@@ -44,6 +42,7 @@ u64 notrace trace_clock_local(void)
 
 	return clock;
 }
+EXPORT_SYMBOL_GPL(trace_clock_local);
 
 /*
  * trace_clock(): 'between' trace clock. Not completely serialized,
@@ -58,6 +57,16 @@ u64 notrace trace_clock(void)
 	return local_clock();
 }
 
+/*
+ * trace_jiffy_clock(): Simply use jiffies as a clock counter.
+ */
+u64 notrace trace_clock_jiffies(void)
+{
+	u64 jiffy = jiffies - INITIAL_JIFFIES;
+
+	/* Return nsecs */
+	return (u64)jiffies_to_usecs(jiffy) * 1000ULL;
+}
 
 /*
  * trace_clock_global(): special globally coherent trace clock
@@ -86,7 +95,7 @@ u64 notrace trace_clock_global(void)
 	local_irq_save(flags);
 
 	this_cpu = raw_smp_processor_id();
-	now = cpu_clock(this_cpu);
+	now = sched_clock_cpu(this_cpu);
 	/*
 	 * If in an NMI context then dont risk lockups and return the
 	 * cpu_clock() time:
@@ -123,5 +132,5 @@ static atomic64_unchecked_t trace_counter;
  */
 u64 notrace trace_clock_counter(void)
 {
-	return atomic64_add_return_unchecked(1, &trace_counter);
+	return atomic64_inc_return_unchecked(&trace_counter);
 }

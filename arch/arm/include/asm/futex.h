@@ -14,6 +14,7 @@
 	"	.long	1b, 4f, 2b, 4f\n"			\
 	"	.popsection\n"					\
 	"	.pushsection .fixup,\"ax\"\n"			\
+	"	.align	2\n"					\
 	"4:	mov	%0, " err_reg "\n"			\
 	"	b	3b\n"					\
 	"	.popsection"
@@ -44,6 +45,8 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
 
+	pax_open_userland();
+
 	smp_mb();
 	__asm__ __volatile__("@futex_atomic_cmpxchg_inatomic\n"
 	"1:	ldrex	%1, [%4]\n"
@@ -58,6 +61,8 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	: "r" (oldval), "r" (newval), "r" (uaddr), "Ir" (-EFAULT)
 	: "cc", "memory");
 	smp_mb();
+
+	pax_close_userland();
 
 	*uval = val;
 	return ret;
@@ -89,6 +94,8 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	if (!access_ok(VERIFY_WRITE, uaddr, sizeof(u32)))
 		return -EFAULT;
 
+	pax_open_userland();
+
 	__asm__ __volatile__("@futex_atomic_cmpxchg_inatomic\n"
 	"1:	" TUSER(ldr) "	%1, [%4]\n"
 	"	teq	%1, %2\n"
@@ -98,6 +105,8 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 	: "+r" (ret), "=&r" (val)
 	: "r" (oldval), "r" (newval), "r" (uaddr), "Ir" (-EFAULT)
 	: "cc", "memory");
+
+	pax_close_userland();
 
 	*uval = val;
 	return ret;
@@ -121,6 +130,7 @@ futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 		return -EFAULT;
 
 	pagefault_disable();	/* implies preempt_disable() */
+	pax_open_userland();
 
 	switch (op) {
 	case FUTEX_OP_SET:
@@ -142,6 +152,7 @@ futex_atomic_op_inuser (int encoded_op, u32 __user *uaddr)
 		ret = -ENOSYS;
 	}
 
+	pax_close_userland();
 	pagefault_enable();	/* subsumes preempt_enable() */
 
 	if (!ret) {

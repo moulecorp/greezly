@@ -80,7 +80,7 @@ static int usX2Y_urb_capt_retire(struct snd_usX2Y_substream *subs)
 		cp = (unsigned char*)urb->transfer_buffer + urb->iso_frame_desc[i].offset;
 		if (urb->iso_frame_desc[i].status) { /* active? hmm, skip this */
 			snd_printk(KERN_ERR "active frame status %i. "
-				   "Most propably some hardware problem.\n",
+				   "Most probably some hardware problem.\n",
 				   urb->iso_frame_desc[i].status);
 			return urb->iso_frame_desc[i].status;
 		}
@@ -491,7 +491,6 @@ static int usX2Y_urbs_start(struct snd_usX2Y_substream *subs)
 			if (0 == i)
 				atomic_set(&subs->state, state_STARTING3);
 			urb->dev = usX2Y->dev;
-			urb->transfer_flags = URB_ISO_ASAP;
 			for (pack = 0; pack < nr_of_packs(); pack++) {
 				urb->iso_frame_desc[pack].offset = subs->maxpacksize * pack;
 				urb->iso_frame_desc[pack].length = subs->maxpacksize;
@@ -684,9 +683,6 @@ static int usX2Y_rate_set(struct usX2Ydev *usX2Y, int rate)
 			((char*)(usbdata + i))[1] = ra[i].c2;
 			usb_fill_bulk_urb(us->urb[i], usX2Y->dev, usb_sndbulkpipe(usX2Y->dev, 4),
 					  usbdata + i, 2, i_usX2Y_04Int, usX2Y);
-#ifdef OLD_USB
-			us->urb[i]->transfer_flags = USB_QUEUE_BULK;
-#endif
 		}
 		us->submitted =	0;
 		us->len =	NOOF_SETRATE_URBS;

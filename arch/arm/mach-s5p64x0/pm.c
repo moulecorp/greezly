@@ -18,7 +18,6 @@
 
 #include <plat/cpu.h>
 #include <plat/pm.h>
-#include <plat/regs-timer.h>
 #include <plat/wakeup-mask.h>
 
 #include <mach/regs-clock.h>
@@ -48,8 +47,6 @@ static struct sleep_save s5p64x0_misc_save[] = {
 	SAVE_ITEM(S5P64X0_MEM0CONSLP1),
 	SAVE_ITEM(S5P64X0_MEM0DRVCON),
 	SAVE_ITEM(S5P64X0_MEM1DRVCON),
-
-	SAVE_ITEM(S3C64XX_TINT_CSTAT),
 };
 
 /* DPLL is present only in S5P6450 */
@@ -103,8 +100,8 @@ static int s5p64x0_cpu_suspend(unsigned long arg)
 	    "mcr p15, 0, %0, c7, c10, 4\n\t"
 	    "mcr p15, 0, %0, c7, c0, 4" : : "r" (tmp));
 
-	/* we should never get past here */
-	panic("sleep resumed to originator?");
+	pr_info("Failed to suspend the system\n");
+	return 1; /* Aborting suspend */
 }
 
 /* mapping of interrupts to parts of the wakeup mask */
@@ -160,7 +157,7 @@ static void s5p64x0_pm_prepare(void)
 
 }
 
-static int s5p64x0_pm_add(struct sys_device *sysdev)
+static int s5p64x0_pm_add(struct device *dev, struct subsys_interface *sif)
 {
 	pm_cpu_prep = s5p64x0_pm_prepare;
 	pm_cpu_sleep = s5p64x0_cpu_suspend;
@@ -169,15 +166,17 @@ static int s5p64x0_pm_add(struct sys_device *sysdev)
 	return 0;
 }
 
-static struct sysdev_driver s5p64x0_pm_driver = {
-	.add		= s5p64x0_pm_add,
+static struct subsys_interface s5p64x0_pm_interface = {
+	.name		= "s5p64x0_pm",
+	.subsys		= &s5p64x0_subsys,
+	.add_dev	= s5p64x0_pm_add,
 };
 
 static __init int s5p64x0_pm_drvinit(void)
 {
 	s3c_pm_init();
 
-	return sysdev_driver_register(&s5p64x0_sysclass, &s5p64x0_pm_driver);
+	return subsys_interface_register(&s5p64x0_pm_interface);
 }
 arch_initcall(s5p64x0_pm_drvinit);
 

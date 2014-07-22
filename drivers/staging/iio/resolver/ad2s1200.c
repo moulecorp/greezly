@@ -19,8 +19,8 @@
 #include <linux/gpio.h>
 #include <linux/module.h>
 
-#include "../iio.h"
-#include "../sysfs.h"
+#include <linux/iio/iio.h>
+#include <linux/iio/sysfs.h>
 
 #define DRV_NAME "ad2s1200"
 
@@ -85,10 +85,12 @@ static const struct iio_chan_spec ad2s1200_channels[] = {
 		.type = IIO_ANGL,
 		.indexed = 1,
 		.channel = 0,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 	}, {
 		.type = IIO_ANGL_VEL,
 		.indexed = 1,
 		.channel = 0,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
 	}
 };
 
@@ -97,7 +99,7 @@ static const struct iio_info ad2s1200_info = {
 	.driver_module = THIS_MODULE,
 };
 
-static int __devinit ad2s1200_probe(struct spi_device *spi)
+static int ad2s1200_probe(struct spi_device *spi)
 {
 	struct ad2s1200_state *st;
 	struct iio_dev *indio_dev;
@@ -105,16 +107,16 @@ static int __devinit ad2s1200_probe(struct spi_device *spi)
 	unsigned short *pins = spi->dev.platform_data;
 
 	for (pn = 0; pn < AD2S1200_PN; pn++)
-		if (gpio_request_one(pins[pn], GPIOF_DIR_OUT, DRV_NAME)) {
-			pr_err("%s: request gpio pin %d failed\n",
-						DRV_NAME, pins[pn]);
-			goto error_ret;
+		ret = devm_gpio_request_one(&spi->dev, pins[pn], GPIOF_DIR_OUT,
+					    DRV_NAME);
+		if (ret) {
+			dev_err(&spi->dev, "request gpio pin %d failed\n",
+							pins[pn]);
+			return ret;
 		}
-	indio_dev = iio_allocate_device(sizeof(*st));
-	if (indio_dev == NULL) {
-		ret = -ENOMEM;
-		goto error_ret;
-	}
+	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
+	if (!indio_dev)
+		return -ENOMEM;
 	spi_set_drvdata(spi, indio_dev);
 	st = iio_priv(indio_dev);
 	mutex_init(&st->lock);
@@ -129,28 +131,13 @@ static int __devinit ad2s1200_probe(struct spi_device *spi)
 	indio_dev->num_channels = ARRAY_SIZE(ad2s1200_channels);
 	indio_dev->name = spi_get_device_id(spi)->name;
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_device_register(&spi->dev, indio_dev);
 	if (ret)
-		goto error_free_dev;
+		return ret;
 
 	spi->max_speed_hz = AD2S1200_HZ;
 	spi->mode = SPI_MODE_3;
 	spi_setup(spi);
-
-	return 0;
-
-error_free_dev:
-	iio_free_device(indio_dev);
-error_ret:
-	for (--pn; pn >= 0; pn--)
-		gpio_free(pins[pn]);
-	return ret;
-}
-
-static int __devexit ad2s1200_remove(struct spi_device *spi)
-{
-	iio_device_unregister(spi_get_drvdata(spi));
-	iio_free_device(spi_get_drvdata(spi));
 
 	return 0;
 }
@@ -160,6 +147,7 @@ static const struct spi_device_id ad2s1200_id[] = {
 	{ "ad2s1205" },
 	{}
 };
+MODULE_DEVICE_TABLE(spi, ad2s1200_id);
 
 static struct spi_driver ad2s1200_driver = {
 	.driver = {
@@ -167,21 +155,9 @@ static struct spi_driver ad2s1200_driver = {
 		.owner = THIS_MODULE,
 	},
 	.probe = ad2s1200_probe,
-	.remove = __devexit_p(ad2s1200_remove),
 	.id_table = ad2s1200_id,
 };
-
-static __init int ad2s1200_spi_init(void)
-{
-	return spi_register_driver(&ad2s1200_driver);
-}
-module_init(ad2s1200_spi_init);
-
-static __exit void ad2s1200_spi_exit(void)
-{
-	spi_unregister_driver(&ad2s1200_driver);
-}
-module_exit(ad2s1200_spi_exit);
+module_spi_driver(ad2s1200_driver);
 
 MODULE_AUTHOR("Graff Yang <graff.yang@gmail.com>");
 MODULE_DESCRIPTION("Analog Devices AD2S1200/1205 Resolver to Digital SPI driver");

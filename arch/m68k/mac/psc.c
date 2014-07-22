@@ -21,7 +21,6 @@
 #include <linux/irq.h>
 
 #include <asm/traps.h>
-#include <asm/bootinfo.h>
 #include <asm/macintosh.h>
 #include <asm/macints.h>
 #include <asm/mac_psc.h>
@@ -54,7 +53,7 @@ static void psc_debug_dump(void)
  * expanded to cover what I think are the other 7 channels.
  */
 
-static void psc_dma_die_die_die(void)
+static __init void psc_dma_die_die_die(void)
 {
 	int i;
 
@@ -179,21 +178,4 @@ void psc_irq_disable(int irq) {
 	printk("psc_irq_disable(%d)\n", irq);
 #endif
 	psc_write_byte(pIER, 1 << irq_idx);
-}
-
-void psc_irq_clear(int irq) {
-	int irq_src	= IRQ_SRC(irq);
-	int irq_idx	= IRQ_IDX(irq);
-	int pIFR	= pIERbase + (irq_src << 4);
-
-	psc_write_byte(pIFR, 1 << irq_idx);
-}
-
-int psc_irq_pending(int irq)
-{
-	int irq_src	= IRQ_SRC(irq);
-	int irq_idx	= IRQ_IDX(irq);
-	int pIFR	= pIERbase + (irq_src << 4);
-
-	return psc_read_byte(pIFR) & (1 << irq_idx);
 }

@@ -18,7 +18,6 @@
 #include <asm/signal.h>
 #include <asm/io.h>
 #include <asm/delay.h>
-#include <asm/rtc.h>
 #include <asm/irq.h>
 #include <asm/irq_regs.h>
 
@@ -47,14 +46,12 @@ static struct clocksource cont_rotime = {
 	.rating = 300,
 	.read   = read_cont_rotime,
 	.mask   = CLOCKSOURCE_MASK(32),
-	.shift  = 10,
 	.flags  = CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
 static int __init etrax_init_cont_rotime(void)
 {
-	cont_rotime.mult = clocksource_khz2mult(100000, cont_rotime.shift);
-	clocksource_register(&cont_rotime);
+	clocksource_register_khz(&cont_rotime, 100000);
 	return 0;
 }
 arch_initcall(etrax_init_cont_rotime);
@@ -69,7 +66,6 @@ unsigned long timer_regs[NR_CPUS] =
 };
 
 extern int set_rtc_mmss(unsigned long nowtime);
-extern int have_rtc;
 
 #ifdef CONFIG_CPU_FREQ
 static int
@@ -220,12 +216,10 @@ static inline irqreturn_t timer_interrupt(int irq, void *dev_id)
         return IRQ_HANDLED;
 }
 
-/* Timer is IRQF_SHARED so drivers can add stuff to the timer irq chain.
- * It needs to be IRQF_DISABLED to make the jiffies update work properly.
- */
+/* Timer is IRQF_SHARED so drivers can add stuff to the timer irq chain. */
 static struct irqaction irq_timer = {
 	.handler = timer_interrupt,
-	.flags = IRQF_SHARED | IRQF_DISABLED,
+	.flags = IRQF_SHARED,
 	.name = "timer"
 };
 
@@ -266,11 +260,6 @@ void __init time_init(void)
 	 * clock has started.
 	 */
 	loops_per_usec = 50;
-
-	if(RTC_INIT() < 0)
-		have_rtc = 0;
-	else
-		have_rtc = 1;
 
 	/* Start CPU local timer. */
 	cris_timer_init();

@@ -19,6 +19,7 @@
 
 #include "types.h"
 #include "d11.h"
+#include "phy_hal.h"
 
 extern const u8 rate_info[];
 extern const struct brcms_c_rateset cck_ofdm_mimo_rates;
@@ -198,11 +199,9 @@ static inline u8 cck_rspec(u8 cck)
 
 /* Convert encoded rate value in plcp header to numerical rates in 500 KHz
  * increments */
-extern const u8 ofdm_rate_lookup[];
-
 static inline u8 ofdm_phy2mac_rate(u8 rlpt)
 {
-	return ofdm_rate_lookup[rlpt & 0x7];
+	return wlc_phy_get_ofdm_rate_lookup()[rlpt & 0x7];
 }
 
 static inline u8 cck_phy2mac_rate(u8 signal)
@@ -217,34 +216,30 @@ static inline u8 cck_phy2mac_rate(u8 signal)
 
 /* sanitize, and sort a rateset with the basic bit(s) preserved, validate
  * rateset */
-extern bool
-brcms_c_rate_hwrs_filter_sort_validate(struct brcms_c_rateset *rs,
-				       const struct brcms_c_rateset *hw_rs,
-				       bool check_brate, u8 txstreams);
+bool brcms_c_rate_hwrs_filter_sort_validate(struct brcms_c_rateset *rs,
+					    const struct brcms_c_rateset *hw_rs,
+					    bool check_brate, u8 txstreams);
 /* copy rateset src to dst as-is (no masking or sorting) */
-extern void brcms_c_rateset_copy(const struct brcms_c_rateset *src,
-			     struct brcms_c_rateset *dst);
+void brcms_c_rateset_copy(const struct brcms_c_rateset *src,
+			  struct brcms_c_rateset *dst);
 
 /* would be nice to have these documented ... */
-extern u32 brcms_c_compute_rspec(struct d11rxhdr *rxh, u8 *plcp);
+u32 brcms_c_compute_rspec(struct d11rxhdr *rxh, u8 *plcp);
 
-extern void brcms_c_rateset_filter(struct brcms_c_rateset *src,
-	struct brcms_c_rateset *dst, bool basic_only, u8 rates, uint xmask,
-	bool mcsallow);
+void brcms_c_rateset_filter(struct brcms_c_rateset *src,
+			    struct brcms_c_rateset *dst, bool basic_only,
+			    u8 rates, uint xmask, bool mcsallow);
 
-extern void
-brcms_c_rateset_default(struct brcms_c_rateset *rs_tgt,
-			const struct brcms_c_rateset *rs_hw, uint phy_type,
-			int bandtype, bool cck_only, uint rate_mask,
-			bool mcsallow, u8 bw, u8 txstreams);
+void brcms_c_rateset_default(struct brcms_c_rateset *rs_tgt,
+			     const struct brcms_c_rateset *rs_hw, uint phy_type,
+			     int bandtype, bool cck_only, uint rate_mask,
+			     bool mcsallow, u8 bw, u8 txstreams);
 
-extern s16 brcms_c_rate_legacy_phyctl(uint rate);
+s16 brcms_c_rate_legacy_phyctl(uint rate);
 
-extern void brcms_c_rateset_mcs_upd(struct brcms_c_rateset *rs, u8 txstreams);
-extern void brcms_c_rateset_mcs_clear(struct brcms_c_rateset *rateset);
-extern void brcms_c_rateset_mcs_build(struct brcms_c_rateset *rateset,
-				      u8 txstreams);
-extern void brcms_c_rateset_bw_mcs_filter(struct brcms_c_rateset *rateset,
-					  u8 bw);
+void brcms_c_rateset_mcs_upd(struct brcms_c_rateset *rs, u8 txstreams);
+void brcms_c_rateset_mcs_clear(struct brcms_c_rateset *rateset);
+void brcms_c_rateset_mcs_build(struct brcms_c_rateset *rateset, u8 txstreams);
+void brcms_c_rateset_bw_mcs_filter(struct brcms_c_rateset *rateset, u8 bw);
 
 #endif				/* _BRCM_RATE_H_ */

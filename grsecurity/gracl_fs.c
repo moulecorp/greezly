@@ -23,7 +23,7 @@ gr_acl_handle_hidden_file(const struct dentry * dentry,
 {
 	__u32 mode;
 
-	if (unlikely(!dentry->d_inode))
+	if (unlikely(d_is_negative(dentry)))
 		return GR_FIND;
 
 	mode =
@@ -48,7 +48,7 @@ gr_acl_handle_open(const struct dentry * dentry, const struct vfsmount * mnt,
 	__u32 reqmode = GR_FIND;
 	__u32 mode;
 
-	if (unlikely(!dentry->d_inode))
+	if (unlikely(d_is_negative(dentry)))
 		return reqmode;
 
 	if (acc_mode & MAY_APPEND)
@@ -266,7 +266,7 @@ gr_acl_handle_link(const struct dentry * new_dentry,
 		   const struct dentry * parent_dentry,
 		   const struct vfsmount * parent_mnt,
 		   const struct dentry * old_dentry,
-		   const struct vfsmount * old_mnt, const char *to)
+		   const struct vfsmount * old_mnt, const struct filename *to)
 {
 	__u32 mode;
 	__u32 needmode = GR_CREATE | GR_LINK;
@@ -277,10 +277,10 @@ gr_acl_handle_link(const struct dentry * new_dentry,
 			  old_mnt);
 
 	if (unlikely(((mode & needmode) == needmode) && (mode & needaudit))) {
-		gr_log_fs_rbac_str(GR_DO_AUDIT, GR_LINK_ACL_MSG, old_dentry, old_mnt, to);
+		gr_log_fs_rbac_str(GR_DO_AUDIT, GR_LINK_ACL_MSG, old_dentry, old_mnt, to->name);
 		return mode;
 	} else if (unlikely(((mode & needmode) != needmode) && !(mode & GR_SUPPRESS))) {
-		gr_log_fs_rbac_str(GR_DONT_AUDIT, GR_LINK_ACL_MSG, old_dentry, old_mnt, to);
+		gr_log_fs_rbac_str(GR_DONT_AUDIT, GR_LINK_ACL_MSG, old_dentry, old_mnt, to->name);
 		return 0;
 	} else if (unlikely((mode & needmode) != needmode))
 		return 0;
@@ -291,7 +291,7 @@ gr_acl_handle_link(const struct dentry * new_dentry,
 __u32
 gr_acl_handle_symlink(const struct dentry * new_dentry,
 		      const struct dentry * parent_dentry,
-		      const struct vfsmount * parent_mnt, const char *from)
+		      const struct vfsmount * parent_mnt, const struct filename *from)
 {
 	__u32 needmode = GR_WRITE | GR_CREATE;
 	__u32 mode;
@@ -302,10 +302,10 @@ gr_acl_handle_symlink(const struct dentry * new_dentry,
 			    GR_WRITE | GR_AUDIT_WRITE | GR_SUPPRESS);
 
 	if (unlikely(mode & GR_WRITE && mode & GR_AUDITS)) {
-		gr_log_fs_str_rbac(GR_DO_AUDIT, GR_SYMLINK_ACL_MSG, from, new_dentry, parent_mnt);
+		gr_log_fs_str_rbac(GR_DO_AUDIT, GR_SYMLINK_ACL_MSG, from->name, new_dentry, parent_mnt);
 		return mode;
 	} else if (unlikely(((mode & needmode) != needmode) && !(mode & GR_SUPPRESS))) {
-		gr_log_fs_str_rbac(GR_DONT_AUDIT, GR_SYMLINK_ACL_MSG, from, new_dentry, parent_mnt);
+		gr_log_fs_str_rbac(GR_DONT_AUDIT, GR_SYMLINK_ACL_MSG, from->name, new_dentry, parent_mnt);
 		return 0;
 	} else if (unlikely((mode & needmode) != needmode))
 		return 0;
@@ -364,7 +364,7 @@ gr_acl_handle_rename(struct dentry *new_dentry,
 		     const struct vfsmount *parent_mnt,
 		     struct dentry *old_dentry,
 		     struct inode *old_parent_inode,
-		     struct vfsmount *old_mnt, const char *newname)
+		     struct vfsmount *old_mnt, const struct filename *newname)
 {
 	__u32 comp1, comp2;
 	int error = 0;
@@ -372,7 +372,7 @@ gr_acl_handle_rename(struct dentry *new_dentry,
 	if (unlikely(!gr_acl_is_enabled()))
 		return 0;
 
-	if (!new_dentry->d_inode) {
+	if (d_is_negative(new_dentry)) {
 		comp1 = gr_check_create(new_dentry, parent_dentry, parent_mnt,
 					GR_READ | GR_WRITE | GR_CREATE | GR_AUDIT_READ |
 					GR_AUDIT_WRITE | GR_AUDIT_CREATE | GR_SUPPRESS);
@@ -395,10 +395,10 @@ gr_acl_handle_rename(struct dentry *new_dentry,
 
 	if (RENAME_CHECK_SUCCESS(comp1, comp2) &&
 	    ((comp1 & GR_AUDITS) || (comp2 & GR_AUDITS)))
-		gr_log_fs_rbac_str(GR_DO_AUDIT, GR_RENAME_ACL_MSG, old_dentry, old_mnt, newname);
+		gr_log_fs_rbac_str(GR_DO_AUDIT, GR_RENAME_ACL_MSG, old_dentry, old_mnt, newname->name);
 	else if (!RENAME_CHECK_SUCCESS(comp1, comp2) && !(comp1 & GR_SUPPRESS)
 		 && !(comp2 & GR_SUPPRESS)) {
-		gr_log_fs_rbac_str(GR_DONT_AUDIT, GR_RENAME_ACL_MSG, old_dentry, old_mnt, newname);
+		gr_log_fs_rbac_str(GR_DONT_AUDIT, GR_RENAME_ACL_MSG, old_dentry, old_mnt, newname->name);
 		error = -EACCES;
 	} else if (unlikely(!RENAME_CHECK_SUCCESS(comp1, comp2)))
 		error = -EACCES;

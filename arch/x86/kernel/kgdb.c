@@ -39,7 +39,6 @@
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/kgdb.h>
-#include <linux/init.h>
 #include <linux/smp.h>
 #include <linux/nmi.h>
 #include <linux/hw_breakpoint.h>
@@ -48,7 +47,6 @@
 
 #include <asm/debugreg.h>
 #include <asm/apicdef.h>
-#include <asm/system.h>
 #include <asm/apic.h>
 #include <asm/nmi.h>
 
@@ -69,8 +67,6 @@ struct dbg_reg_def_t dbg_reg_def[DBG_MAX_REG_NUM] =
 	{ "ss", 4, offsetof(struct pt_regs, ss) },
 	{ "ds", 4, offsetof(struct pt_regs, ds) },
 	{ "es", 4, offsetof(struct pt_regs, es) },
-	{ "fs", 4, -1 },
-	{ "gs", 4, -1 },
 #else
 	{ "ax", 8, offsetof(struct pt_regs, ax) },
 	{ "bx", 8, offsetof(struct pt_regs, bx) },
@@ -92,7 +88,11 @@ struct dbg_reg_def_t dbg_reg_def[DBG_MAX_REG_NUM] =
 	{ "flags", 4, offsetof(struct pt_regs, flags) },
 	{ "cs", 4, offsetof(struct pt_regs, cs) },
 	{ "ss", 4, offsetof(struct pt_regs, ss) },
+	{ "ds", 4, -1 },
+	{ "es", 4, -1 },
 #endif
+	{ "fs", 4, -1 },
+	{ "gs", 4, -1 },
 };
 
 int dbg_set_reg(int regno, void *mem, struct pt_regs *regs)
@@ -446,12 +446,12 @@ void kgdb_roundup_cpus(unsigned long flags)
 
 /**
  *	kgdb_arch_handle_exception - Handle architecture specific GDB packets.
- *	@vector: The error vector of the exception that happened.
+ *	@e_vector: The error vector of the exception that happened.
  *	@signo: The signal number of the exception that happened.
  *	@err_code: The error code of the exception that happened.
- *	@remcom_in_buffer: The buffer of the packet we have read.
- *	@remcom_out_buffer: The buffer of %BUFMAX bytes to write a packet into.
- *	@regs: The &struct pt_regs of the current process.
+ *	@remcomInBuffer: The buffer of the packet we have read.
+ *	@remcomOutBuffer: The buffer of %BUFMAX bytes to write a packet into.
+ *	@linux_regs: The &struct pt_regs of the current process.
  *
  *	This function MUST handle the 'c' and 's' command packets,
  *	as well packets to set / remove a hardware breakpoint, if used.
@@ -748,7 +748,9 @@ void kgdb_arch_set_pc(struct pt_regs *regs, unsigned long ip)
 int kgdb_arch_set_breakpoint(struct kgdb_bkpt *bpt)
 {
 	int err;
+#ifdef CONFIG_DEBUG_RODATA
 	char opc[BREAK_INSTR_SIZE];
+#endif /* CONFIG_DEBUG_RODATA */
 
 	bpt->type = BP_BREAKPOINT;
 	err = probe_kernel_read(bpt->saved_instr, ktla_ktva((char *)bpt->bpt_addr),

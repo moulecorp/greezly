@@ -19,8 +19,6 @@ typedef elf_greg_t elf_gregset_t[ELF_NGREG];
 
 typedef struct user_fp elf_fpregset_t;
 
-#define EM_ARM	40
-
 #define EF_ARM_EABI_MASK	0xff000000
 #define EF_ARM_EABI_UNKNOWN	0x00000000
 #define EF_ARM_EABI_VER1	0x01000000
@@ -133,8 +131,10 @@ int dump_task_regs(struct task_struct *t, elf_gregset_t *elfregs);
 extern void elf_set_personality(const struct elf32_hdr *);
 #define SET_PERSONALITY(ex)	elf_set_personality(&(ex))
 
-extern int vectors_user_mapping(void);
-#define arch_setup_additional_pages(bprm, uses_interp) vectors_user_mapping()
-#define ARCH_HAS_SETUP_ADDITIONAL_PAGES
+#ifdef CONFIG_MMU
+#define ARCH_HAS_SETUP_ADDITIONAL_PAGES 1
+struct linux_binprm;
+int arch_setup_additional_pages(struct linux_binprm *, int);
+#endif
 
 #endif

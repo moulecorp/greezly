@@ -41,13 +41,14 @@
 /* Supported palette hacks */
 enum {
 	cmap_unknown,
-	cmap_m64,		/* ATI Mach64 */
+	cmap_simple,		/* ATI Mach64 */
 	cmap_r128,		/* ATI Rage128 */
 	cmap_M3A,		/* ATI Rage Mobility M3 Head A */
 	cmap_M3B,		/* ATI Rage Mobility M3 Head B */
 	cmap_radeon,		/* ATI Radeon */
 	cmap_gxt2000,		/* IBM GXT2000 */
 	cmap_avivo,		/* ATI R5xx */
+	cmap_qemu,		/* qemu vga */
 };
 
 struct offb_par {
@@ -90,6 +91,15 @@ extern boot_infos_t *boot_infos;
 #define AVIVO_DC_LUTB_WHITE_OFFSET_GREEN        0x6cd4
 #define AVIVO_DC_LUTB_WHITE_OFFSET_RED          0x6cd8
 
+#define FB_RIGHT_POS(p, bpp)         (fb_be_math(p) ? 0 : (32 - (bpp)))
+
+static inline u32 offb_cmap_byteswap(struct fb_info *info, u32 value)
+{
+	u32 bpp = info->var.bits_per_pixel;
+
+	return cpu_to_be32(value) >> FB_RIGHT_POS(info, bpp);
+}
+
     /*
      *  Set a single color register. The values supplied are already
      *  rounded down to the hardware's capabilities (according to the
@@ -119,7 +129,7 @@ static int offb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 			mask <<= info->var.transp.offset;
 			value |= mask;
 		}
-		pal[regno] = value;
+		pal[regno] = offb_cmap_byteswap(info, value);
 		return 0;
 	}
 
@@ -134,7 +144,7 @@ static int offb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 		return 0;
 
 	switch (par->cmap_type) {
-	case cmap_m64:
+	case cmap_simple:
 		writeb(regno, par->cmap_adr);
 		writeb(red, par->cmap_data);
 		writeb(green, par->cmap_data);
@@ -204,7 +214,7 @@ static int offb_blank(int blank, struct fb_info *info)
 	if (blank)
 		for (i = 0; i < 256; i++) {
 			switch (par->cmap_type) {
-			case cmap_m64:
+			case cmap_simple:
 				writeb(i, par->cmap_adr);
 				for (j = 0; j < 3; j++)
 					writeb(0, par->cmap_data);
@@ -300,7 +310,7 @@ static struct fb_ops offb_ops = {
 static void __iomem *offb_map_reg(struct device_node *np, int index,
 				  unsigned long offset, unsigned long size)
 {
-	const u32 *addrp;
+	const __be32 *addrp;
 	u64 asize, taddr;
 	unsigned int flags;
 
@@ -346,7 +356,7 @@ static void offb_init_palette_hacks(struct fb_info *info, struct device_node *dp
 		par->cmap_adr =
 			ioremap(base + 0x7ff000, 0x1000) + 0xcc0;
 		par->cmap_data = par->cmap_adr + 1;
-		par->cmap_type = cmap_m64;
+		par->cmap_type = cmap_simple;
 	} else if (dp && (of_device_is_compatible(dp, "pci1014,b7") ||
 			  of_device_is_compatible(dp, "pci1014,21c"))) {
 		par->cmap_adr = offb_map_reg(dp, 0, 0x6000, 0x1000);
@@ -367,6 +377,20 @@ static void offb_init_palette_hacks(struct fb_info *info, struct device_node *dp
 				par->cmap_type = cmap_avivo;
 		}
 		of_node_put(pciparent);
+	} else if (dp && of_device_is_compatible(dp, "qemu,std-vga")) {
+#ifdef __BIG_ENDIAN
+		const __be32 io_of_addr[3] = { 0x01000000, 0x0, 0x0 };
+#else
+		const __be32 io_of_addr[3] = { 0x00000001, 0x0, 0x0 };
+#endif
+		u64 io_addr = of_translate_address(dp, io_of_addr);
+		if (io_addr != OF_BAD_ADDR) {
+			par->cmap_adr = ioremap(io_addr + 0x3c8, 2);
+			if (par->cmap_adr) {
+				par->cmap_type = cmap_simple;
+				par->cmap_data = par->cmap_adr + 1;
+			}
+		}
 	}
 	info->fix.visual = (par->cmap_type != cmap_unknown) ?
 		FB_VISUAL_PSEUDOCOLOR : FB_VISUAL_STATIC_PSEUDOCOLOR;
@@ -504,8 +528,7 @@ static void __init offb_init_fb(const char *name, const char *full_name,
 	if (register_framebuffer(info) < 0)
 		goto out_err;
 
-	printk(KERN_INFO "fb%d: Open Firmware frame buffer device on %s\n",
-	       info->node, full_name);
+	fb_info(info, "Open Firmware frame buffer device on %s\n", full_name);
 	return;
 
 out_err:
@@ -525,7 +548,7 @@ static void __init offb_init_nodriver(struct device_node *dp, int no_real_node)
 	unsigned int flags, rsize, addr_prop = 0;
 	unsigned long max_size = 0;
 	u64 rstart, address = OF_BAD_ADDR;
-	const u32 *pp, *addrp, *up;
+	const __be32 *pp, *addrp, *up;
 	u64 asize;
 	int foreign_endian = 0;
 
@@ -541,25 +564,25 @@ static void __init offb_init_nodriver(struct device_node *dp, int no_real_node)
 	if (pp == NULL)
 		pp = of_get_property(dp, "depth", &len);
 	if (pp && len == sizeof(u32))
-		depth = *pp;
+		depth = be32_to_cpup(pp);
 
 	pp = of_get_property(dp, "linux,bootx-width", &len);
 	if (pp == NULL)
 		pp = of_get_property(dp, "width", &len);
 	if (pp && len == sizeof(u32))
-		width = *pp;
+		width = be32_to_cpup(pp);
 
 	pp = of_get_property(dp, "linux,bootx-height", &len);
 	if (pp == NULL)
 		pp = of_get_property(dp, "height", &len);
 	if (pp && len == sizeof(u32))
-		height = *pp;
+		height = be32_to_cpup(pp);
 
 	pp = of_get_property(dp, "linux,bootx-linebytes", &len);
 	if (pp == NULL)
 		pp = of_get_property(dp, "linebytes", &len);
 	if (pp && len == sizeof(u32) && (*pp != 0xffffffffu))
-		pitch = *pp;
+		pitch = be32_to_cpup(pp);
 	else
 		pitch = width * ((depth + 7) / 8);
 

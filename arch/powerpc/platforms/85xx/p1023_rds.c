@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2011 Freescale Semiconductor, Inc.
+ * Copyright 2010-2011, 2013 Freescale Semiconductor, Inc.
  *
  * Author: Roy Zang <tie-fei.zang@freescale.com>
  *
@@ -22,7 +22,6 @@
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
 
-#include <asm/system.h>
 #include <asm/time.h>
 #include <asm/machdep.h>
 #include <asm/pci-bridge.h>
@@ -30,19 +29,18 @@
 #include <asm/prom.h>
 #include <asm/udbg.h>
 #include <asm/mpic.h>
+#include "smp.h"
 
 #include <sysdev/fsl_soc.h>
 #include <sysdev/fsl_pci.h>
+
+#include "mpc85xx.h"
 
 /* ************************************************************************
  *
  * Setup the architecture
  *
  */
-#ifdef CONFIG_SMP
-void __init mpc85xx_smp_init(void);
-#endif
-
 static void __init mpc85xx_rds_setup_arch(void)
 {
 	struct device_node *np;
@@ -82,58 +80,21 @@ static void __init mpc85xx_rds_setup_arch(void)
 		}
 	}
 
-#ifdef CONFIG_PCI
-	for_each_compatible_node(np, "pci", "fsl,p1023-pcie")
-		fsl_add_bridge(np, 0);
-#endif
-
-#ifdef CONFIG_SMP
 	mpc85xx_smp_init();
-#endif
+
+	fsl_pci_assign_primary();
 }
 
-static struct of_device_id p1023_ids[] = {
-	{ .type = "soc", },
-	{ .compatible = "soc", },
-	{ .compatible = "simple-bus", },
-	{},
-};
-
-
-static int __init p1023_publish_devices(void)
-{
-	of_platform_bus_probe(NULL, p1023_ids, NULL);
-
-	return 0;
-}
-
-machine_device_initcall(p1023_rds, p1023_publish_devices);
+machine_arch_initcall(p1023_rds, mpc85xx_common_publish_devices);
+machine_arch_initcall(p1023_rdb, mpc85xx_common_publish_devices);
 
 static void __init mpc85xx_rds_pic_init(void)
 {
-	struct mpic *mpic;
-	struct resource r;
-	struct device_node *np = NULL;
-
-	np = of_find_node_by_type(NULL, "open-pic");
-	if (!np) {
-		printk(KERN_ERR "Could not find open-pic node\n");
-		return;
-	}
-
-	if (of_address_to_resource(np, 0, &r)) {
-		printk(KERN_ERR "Failed to map mpic register space\n");
-		of_node_put(np);
-		return;
-	}
-
-	mpic = mpic_alloc(np, r.start,
-		MPIC_PRIMARY | MPIC_WANTS_RESET | MPIC_BIG_ENDIAN |
-		MPIC_BROKEN_FRR_NIRQS | MPIC_SINGLE_DEST_CPU,
+	struct mpic *mpic = mpic_alloc(NULL, 0, MPIC_BIG_ENDIAN |
+		MPIC_SINGLE_DEST_CPU,
 		0, 256, " OpenPIC  ");
 
 	BUG_ON(mpic == NULL);
-	of_node_put(np);
 
 	mpic_init(mpic);
 }
@@ -143,6 +104,14 @@ static int __init p1023_rds_probe(void)
 	unsigned long root = of_get_flat_dt_root();
 
 	return of_flat_dt_is_compatible(root, "fsl,P1023RDS");
+
+}
+
+static int __init p1023_rdb_probe(void)
+{
+	unsigned long root = of_get_flat_dt_root();
+
+	return of_flat_dt_is_compatible(root, "fsl,P1023RDB");
 
 }
 
@@ -160,3 +129,16 @@ define_machine(p1023_rds) {
 #endif
 };
 
+define_machine(p1023_rdb) {
+	.name			= "P1023 RDB",
+	.probe			= p1023_rdb_probe,
+	.setup_arch		= mpc85xx_rds_setup_arch,
+	.init_IRQ		= mpc85xx_rds_pic_init,
+	.get_irq		= mpic_get_irq,
+	.restart		= fsl_rstcr_restart,
+	.calibrate_decr		= generic_calibrate_decr,
+	.progress		= udbg_progress,
+#ifdef CONFIG_PCI
+	.pcibios_fixup_bus	= fsl_pcibios_fixup_bus,
+#endif
+};

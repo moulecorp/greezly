@@ -14,6 +14,8 @@
 #include <linux/console.h>
 
 #include <asm/bootinfo.h>
+#include <asm/bootinfo-hp300.h>
+#include <asm/byteorder.h>
 #include <asm/machdep.h>
 #include <asm/blinken.h>
 #include <asm/io.h>                               /* readb() and writeb() */
@@ -24,7 +26,8 @@
 
 unsigned long hp300_model;
 unsigned long hp300_uart_scode = -1;
-unsigned char ledstate;
+unsigned char hp300_ledstate;
+EXPORT_SYMBOL(hp300_ledstate);
 
 static char s_hp330[] __initdata = "330";
 static char s_hp340[] __initdata = "340";
@@ -69,15 +72,15 @@ extern int hp300_setup_serial_console(void) __init;
 int __init hp300_parse_bootinfo(const struct bi_record *record)
 {
 	int unknown = 0;
-	const unsigned long *data = record->data;
+	const void *data = record->data;
 
-	switch (record->tag) {
+	switch (be16_to_cpu(record->tag)) {
 	case BI_HP300_MODEL:
-		hp300_model = *data;
+		hp300_model = be32_to_cpup(data);
 		break;
 
 	case BI_HP300_UART_SCODE:
-		hp300_uart_scode = *data;
+		hp300_uart_scode = be32_to_cpup(data);
 		break;
 
 	case BI_HP300_UART_ADDR:
@@ -250,7 +253,7 @@ void __init config_hp300(void)
 	mach_sched_init      = hp300_sched_init;
 	mach_init_IRQ        = hp300_init_IRQ;
 	mach_get_model       = hp300_get_model;
-	mach_gettimeoffset   = hp300_gettimeoffset;
+	arch_gettimeoffset   = hp300_gettimeoffset;
 	mach_hwclk	     = hp300_hwclk;
 	mach_get_ss	     = hp300_get_ss;
 	mach_reset           = hp300_reset;

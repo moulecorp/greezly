@@ -23,7 +23,6 @@
 #include <linux/ftrace.h>
 
 #include <linux/atomic.h>
-#include <asm/system.h>
 #include <asm/uaccess.h>
 
 #ifdef CONFIG_KGDB
@@ -49,7 +48,7 @@ again:
 }
 
 /*
- * Allocate the 16 legacy interrupts for i8259 devices.  This happens early
+ * Allocate the 16 legacy interrupts for i8259 devices.	 This happens early
  * in the kernel initialization so treating allocation failure as BUG() is
  * ok.
  */
@@ -78,17 +77,17 @@ void ack_bad_irq(unsigned int irq)
 	printk("unexpected IRQ # %d\n", irq);
 }
 
-atomic_t irq_err_count;
+atomic_unchecked_t irq_err_count;
 
 int arch_show_interrupts(struct seq_file *p, int prec)
 {
-	seq_printf(p, "%*s: %10u\n", prec, "ERR", atomic_read(&irq_err_count));
+	seq_printf(p, "%*s: %10u\n", prec, "ERR", atomic_read_unchecked(&irq_err_count));
 	return 0;
 }
 
 asmlinkage void spurious_interrupt(void)
 {
-	atomic_inc(&irq_err_count);
+	atomic_inc_unchecked(&irq_err_count);
 }
 
 void __init init_IRQ(void)

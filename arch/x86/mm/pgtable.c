@@ -25,8 +25,12 @@ pgtable_t pte_alloc_one(struct mm_struct *mm, unsigned long address)
 	struct page *pte;
 
 	pte = alloc_pages(__userpte_alloc_gfp, 0);
-	if (pte)
-		pgtable_page_ctor(pte);
+	if (!pte)
+		return NULL;
+	if (!pgtable_page_ctor(pte)) {
+		__free_page(pte);
+		return NULL;
+	}
 	return pte;
 }
 
@@ -57,8 +61,17 @@ void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte)
 #if PAGETABLE_LEVELS > 2
 void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 {
+	struct page *page = virt_to_page(pmd);
 	paravirt_release_pmd(__pa(pmd) >> PAGE_SHIFT);
-	tlb_remove_page(tlb, virt_to_page(pmd));
+	/*
+	 * NOTE! For PAE, any changes to the top page-directory-pointer-table
+	 * entries need a full cr3 reload to flush.
+	 */
+#ifdef CONFIG_X86_PAE
+	tlb->need_flush_all = 1;
+#endif
+	pgtable_pmd_page_dtor(page);
+	tlb_remove_page(tlb, page);
 }
 
 #if PAGETABLE_LEVELS > 3
@@ -90,6 +103,9 @@ pgdval_t clone_pgd_mask __read_only = ~_PAGE_PRESENT;
 void __shadow_user_pgds(pgd_t *dst, const pgd_t *src)
 {
 	unsigned int count = USER_PGD_PTRS;
+
+	if (!pax_user_shadow_base)
+		return;
 
 	while (count--)
 		*dst++ = __pgd((pgd_val(*src++) | (_PAGE_NX & __supported_pte_mask)) & ~_PAGE_USER);
@@ -124,6 +140,8 @@ void __clone_user_pgds(pgd_t *dst, const pgd_t *src)
 #define pxd_t				pud_t
 #define pyd_t				pgd_t
 #define paravirt_release_pxd(pfn)	paravirt_release_pud(pfn)
+#define pgtable_pxd_page_ctor(page)	true
+#define pgtable_pxd_page_dtor(page)
 #define pxd_free(mm, pud)		pud_free((mm), (pud))
 #define pyd_populate(mm, pgd, pud)	pgd_populate((mm), (pgd), (pud))
 #define pyd_offset(mm, address)		pgd_offset((mm), (address))
@@ -132,6 +150,8 @@ void __clone_user_pgds(pgd_t *dst, const pgd_t *src)
 #define pxd_t				pmd_t
 #define pyd_t				pud_t
 #define paravirt_release_pxd(pfn)	paravirt_release_pmd(pfn)
+#define pgtable_pxd_page_ctor(page)	pgtable_pmd_page_ctor(page)
+#define pgtable_pxd_page_dtor(page)	pgtable_pmd_page_dtor(page)
 #define pxd_free(mm, pud)		pmd_free((mm), (pud))
 #define pyd_populate(mm, pgd, pud)	pud_populate((mm), (pgd), (pud))
 #define pyd_offset(mm, address)		pud_offset((mm), (address))
@@ -192,7 +212,7 @@ static void pgd_dtor(pgd_t *pgd)
  * against pageattr.c; it is the unique case in which a valid change
  * of kernel pagetables can't be lazily synchronized by vmalloc faults.
  * vmalloc faults work because attached pagetables are never freed.
- * -- wli
+ * -- nyc
  */
 
 #if defined(CONFIG_X86_32) && defined(CONFIG_X86_PAE)
@@ -239,8 +259,10 @@ static void free_pxds(pxd_t *pxds[])
 	int i;
 
 	for(i = 0; i < PREALLOCATED_PXDS; i++)
-		if (pxds[i])
+		if (pxds[i]) {
+			pgtable_pxd_page_dtor(virt_to_page(pxds[i]));
 			free_page((unsigned long)pxds[i]);
+		}
 }
 
 static int preallocate_pxds(pxd_t *pxds[])
@@ -250,8 +272,13 @@ static int preallocate_pxds(pxd_t *pxds[])
 
 	for(i = 0; i < PREALLOCATED_PXDS; i++) {
 		pxd_t *pxd = (pxd_t *)__get_free_page(PGALLOC_GFP);
-		if (pxd == NULL)
+		if (!pxd)
 			failed = true;
+		if (pxd && !pgtable_pxd_page_ctor(virt_to_page(pxd))) {
+			free_page((unsigned long)pxd);
+			pxd = NULL;
+			failed = true;
+		}
 		pxds[i] = pxd;
 	}
 
@@ -290,7 +317,6 @@ static void pgd_mop_up_pxds(struct mm_struct *mm, pgd_t *pgdp)
 static void pgd_prepopulate_pxd(struct mm_struct *mm, pgd_t *pgd, pxd_t *pxds[])
 {
 	pyd_t *pyd;
-	unsigned long addr;
 	int i;
 
 	if (PREALLOCATED_PXDS == 0) /* Work around gcc-3.4.x bug */
@@ -302,10 +328,8 @@ static void pgd_prepopulate_pxd(struct mm_struct *mm, pgd_t *pgd, pxd_t *pxds[])
 	pyd = pyd_offset(pgd, 0L);
 #endif
 
- 	for (addr = i = 0; i < PREALLOCATED_PXDS;
-	     i++, pyd++, addr += PYD_SIZE) {
+	for (i = 0; i < PREALLOCATED_PXDS; i++, pyd++) {
 		pxd_t *pxd = pxds[i];
-
 		if (i >= KERNEL_PGD_BOUNDARY)
 			memcpy(pxd, (pxd_t *)pgd_page_vaddr(swapper_pg_dir[i]),
 			       sizeof(pxd_t) * PTRS_PER_PMD);
@@ -362,6 +386,13 @@ void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 	free_page((unsigned long)pgd);
 }
 
+/*
+ * Used to set accessed or dirty bits in the page table entries
+ * on other architectures. On x86, the accessed and dirty bits
+ * are tracked by hardware. However, do_wp_page calls this function
+ * to also make the pte writeable at the same time the dirty bit is
+ * set. In that case we do actually need to write the PTE.
+ */
 int ptep_set_access_flags(struct vm_area_struct *vma,
 			  unsigned long address, pte_t *ptep,
 			  pte_t entry, int dirty)
@@ -371,7 +402,6 @@ int ptep_set_access_flags(struct vm_area_struct *vma,
 	if (changed && dirty) {
 		*ptep = entry;
 		pte_update_defer(vma->vm_mm, address, ptep);
-		flush_tlb_page(vma, address);
 	}
 
 	return changed;
@@ -389,7 +419,12 @@ int pmdp_set_access_flags(struct vm_area_struct *vma,
 	if (changed && dirty) {
 		*pmdp = entry;
 		pmd_update_defer(vma->vm_mm, address, pmdp);
-		flush_tlb_range(vma, address, address + HPAGE_PMD_SIZE);
+		/*
+		 * We had a write-protection fault here and changed the pmd
+		 * to to more permissive. No need to flush the TLB for that,
+		 * #PF is architecturally guaranteed to do that and in the
+		 * worst-case we'll generate a spurious fault.
+		 */
 	}
 
 	return changed;

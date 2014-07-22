@@ -13,9 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- * USA
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 Module Name:
 
@@ -586,7 +584,6 @@ typedef enum {
 
 #define PKT_BUFF_SZ			1536
 #define MIN_PKT_LEN			60
-#define ETH_ADDR_LEN			6
 
 #define  AMD8111E_TX_TIMEOUT		(3 * HZ)/* 3 sec */
 #define SOFT_TIMER_FREQ 		0xBEBC  /* 0.5 sec */
@@ -754,7 +751,7 @@ struct amd8111e_priv{
 	const char *name;
 	struct pci_dev *pci_dev;	/* Ptr to the associated pci_dev */
 	struct net_device* amd8111e_net_dev; 	/* ptr to associated net_device */
-	/* Transmit and recive skbs */
+	/* Transmit and receive skbs */
 	struct sk_buff *tx_skbuff[NUM_TX_BUFFERS];
 	struct sk_buff *rx_skbuff[NUM_RX_BUFFERS];
 	/* Transmit and receive dma mapped addr */
@@ -808,8 +805,8 @@ typedef enum {
 
 static int card_idx;
 static int speed_duplex[MAX_UNITS] = { 0, };
-static int coalesce[MAX_UNITS] = {1,1,1,1,1,1,1,1};
-static int dynamic_ipg[MAX_UNITS] = {0,0,0,0,0,0,0,0};
+static bool coalesce[MAX_UNITS] = { [ 0 ... MAX_UNITS-1] = true };
+static bool dynamic_ipg[MAX_UNITS] = { [ 0 ... MAX_UNITS-1] = false };
 static unsigned int chip_version;
 
 #endif /* _AMD8111E_H */

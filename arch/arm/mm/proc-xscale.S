@@ -142,6 +142,7 @@ ENTRY(cpu_xscale_proc_fin)
  * Beware PXA270 erratum E7.
  */
 	.align	5
+	.pushsection	.idmap.text, "ax"
 ENTRY(cpu_xscale_reset)
 	mov	r1, #PSR_F_BIT|PSR_I_BIT|SVC_MODE
 	msr	cpsr_c, r1			@ reset CPSR
@@ -160,6 +161,8 @@ ENTRY(cpu_xscale_reset)
 	@ already containing those two last instructions to survive.
 	mcr	p15, 0, ip, c8, c7, 0		@ invalidate I & D TLBs
 	mov	pc, r0
+ENDPROC(cpu_xscale_reset)
+	.popsection
 
 /*
  * cpu_xscale_do_idle()
@@ -407,6 +410,9 @@ ENTRY(xscale_dma_unmap_area)
 	mov	pc, lr
 ENDPROC(xscale_dma_unmap_area)
 
+	.globl	xscale_flush_kern_cache_louis
+	.equ	xscale_flush_kern_cache_louis, xscale_flush_kern_cache_all
+
 	@ define struct cpu_cache_fns (see <asm/cacheflush.h> and proc-macros.S)
 	define_cache_functions xscale
 
@@ -436,6 +442,7 @@ ENDPROC(xscale_dma_unmap_area)
 	a0_alias flush_icache_all
 	a0_alias flush_user_cache_all
 	a0_alias flush_kern_cache_all
+	a0_alias flush_kern_cache_louis
 	a0_alias flush_user_cache_range
 	a0_alias coherent_kern_range
 	a0_alias coherent_user_range
@@ -550,8 +557,6 @@ ENTRY(cpu_xscale_do_resume)
 	b	cpu_resume_mmu
 ENDPROC(cpu_xscale_do_resume)
 #endif
-
-	__CPUINIT
 
 	.type	__xscale_setup, #function
 __xscale_setup:

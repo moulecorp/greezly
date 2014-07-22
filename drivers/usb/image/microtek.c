@@ -125,7 +125,6 @@
 #include <linux/errno.h>
 #include <linux/random.h>
 #include <linux/poll.h>
-#include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/usb.h>
@@ -809,19 +808,7 @@ static void mts_usb_disconnect (struct usb_interface *intf)
 	kfree(desc);
 }
 
-
-static int __init microtek_drv_init(void)
-{
-	return usb_register(&mts_usb_driver);
-}
-
-static void __exit microtek_drv_exit(void)
-{
-	usb_deregister(&mts_usb_driver);
-}
-
-module_init(microtek_drv_init);
-module_exit(microtek_drv_exit);
+module_usb_driver(mts_usb_driver);
 
 MODULE_AUTHOR( DRIVER_AUTHOR );
 MODULE_DESCRIPTION( DRIVER_DESC );

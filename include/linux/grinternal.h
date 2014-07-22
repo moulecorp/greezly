@@ -60,18 +60,18 @@ extern int grsec_enable_chroot_caps;
 extern int grsec_enable_chroot_sysctl;
 extern int grsec_enable_chroot_unix;
 extern int grsec_enable_symlinkown;
-extern int grsec_symlinkown_gid;
+extern kgid_t grsec_symlinkown_gid;
 extern int grsec_enable_tpe;
-extern int grsec_tpe_gid;
+extern kgid_t grsec_tpe_gid;
 extern int grsec_enable_tpe_all;
 extern int grsec_enable_tpe_invert;
 extern int grsec_enable_socket_all;
-extern int grsec_socket_all_gid;
+extern kgid_t grsec_socket_all_gid;
 extern int grsec_enable_socket_client;
-extern int grsec_socket_client_gid;
+extern kgid_t grsec_socket_client_gid;
 extern int grsec_enable_socket_server;
-extern int grsec_socket_server_gid;
-extern int grsec_audit_gid;
+extern kgid_t grsec_socket_server_gid;
+extern kgid_t grsec_audit_gid;
 extern int grsec_enable_group;
 extern int grsec_enable_log_rwxmaps;
 extern int grsec_enable_mount;
@@ -93,31 +93,23 @@ extern rwlock_t grsec_exec_file_lock;
 
 #define gr_task_fullpath(tsk) ((tsk)->exec_file ? \
 			gr_to_filename2((tsk)->exec_file->f_path.dentry, \
-			(tsk)->exec_file->f_vfsmnt) : "/")
+			(tsk)->exec_file->f_path.mnt) : "/")
 
 #define gr_parent_task_fullpath(tsk) ((tsk)->real_parent->exec_file ? \
 			gr_to_filename3((tsk)->real_parent->exec_file->f_path.dentry, \
-			(tsk)->real_parent->exec_file->f_vfsmnt) : "/")
+			(tsk)->real_parent->exec_file->f_path.mnt) : "/")
 
 #define gr_task_fullpath0(tsk) ((tsk)->exec_file ? \
 			gr_to_filename((tsk)->exec_file->f_path.dentry, \
-			(tsk)->exec_file->f_vfsmnt) : "/")
+			(tsk)->exec_file->f_path.mnt) : "/")
 
 #define gr_parent_task_fullpath0(tsk) ((tsk)->real_parent->exec_file ? \
 			gr_to_filename1((tsk)->real_parent->exec_file->f_path.dentry, \
-			(tsk)->real_parent->exec_file->f_vfsmnt) : "/")
+			(tsk)->real_parent->exec_file->f_path.mnt) : "/")
 
 #define proc_is_chrooted(tsk_a)  ((tsk_a)->gr_is_chrooted)
 
 #define have_same_root(tsk_a,tsk_b) ((tsk_a)->gr_chroot_dentry == (tsk_b)->gr_chroot_dentry)
-
-#define DEFAULTSECARGS(task, cred, pcred) gr_task_fullpath(task), (task)->comm, \
-		       (task)->pid, (cred)->uid, \
-		       (cred)->euid, (cred)->gid, (cred)->egid, \
-		       gr_parent_task_fullpath(task), \
-		       (task)->real_parent->comm, (task)->real_parent->pid, \
-		       (pcred)->uid, (pcred)->euid, \
-		       (pcred)->gid, (pcred)->egid
 
 static inline bool gr_is_same_file(const struct file *file1, const struct file *file2)
 {

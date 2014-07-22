@@ -38,8 +38,8 @@
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
-static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
-static int precise_ptr[SNDRV_CARDS];			/* Enable precise pointer */
+static bool enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable this card */
+static bool precise_ptr[SNDRV_CARDS];			/* Enable precise pointer */
 
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for RME Digi9652 (Hammerfall) soundcard.");
@@ -294,10 +294,6 @@ static int snd_hammerfall_get_buffer(struct pci_dev *pci, struct snd_dma_buffer 
 {
 	dmab->dev.type = SNDRV_DMA_TYPE_DEV;
 	dmab->dev.dev = snd_dma_pci_data(pci);
-	if (snd_dma_get_reserved_buf(dmab, snd_dma_pci_buf_id(pci))) {
-		if (dmab->bytes >= size)
-			return 0;
-	}
 	if (snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, snd_dma_pci_data(pci),
 				size, dmab) < 0)
 		return -ENOMEM;
@@ -306,10 +302,8 @@ static int snd_hammerfall_get_buffer(struct pci_dev *pci, struct snd_dma_buffer 
 
 static void snd_hammerfall_free_buffer(struct snd_dma_buffer *dmab, struct pci_dev *pci)
 {
-	if (dmab->area) {
-		dmab->dev.dev = NULL; /* make it anonymous */
-		snd_dma_reserve_buf(dmab, snd_dma_pci_buf_id(pci));
-	}
+	if (dmab->area)
+		snd_dma_free_pages(dmab);
 }
 
 
@@ -1757,7 +1751,7 @@ snd_rme9652_proc_read(struct snd_info_entry *entry, struct snd_info_buffer *buff
 	snd_iprintf(buffer, "\n");
 }
 
-static void __devinit snd_rme9652_proc_init(struct snd_rme9652 *rme9652)
+static void snd_rme9652_proc_init(struct snd_rme9652 *rme9652)
 {
 	struct snd_info_entry *entry;
 
@@ -1788,7 +1782,7 @@ static int snd_rme9652_free(struct snd_rme9652 *rme9652)
 	return 0;
 }
 
-static int __devinit snd_rme9652_initialize_memory(struct snd_rme9652 *rme9652)
+static int snd_rme9652_initialize_memory(struct snd_rme9652 *rme9652)
 {
 	unsigned long pb_bus, cb_bus;
 
@@ -2414,8 +2408,8 @@ static struct snd_pcm_ops snd_rme9652_capture_ops = {
 	.copy =		snd_rme9652_capture_copy,
 };
 
-static int __devinit snd_rme9652_create_pcm(struct snd_card *card,
-					 struct snd_rme9652 *rme9652)
+static int snd_rme9652_create_pcm(struct snd_card *card,
+				  struct snd_rme9652 *rme9652)
 {
 	struct snd_pcm *pcm;
 	int err;
@@ -2438,9 +2432,9 @@ static int __devinit snd_rme9652_create_pcm(struct snd_card *card,
 	return 0;
 }
 
-static int __devinit snd_rme9652_create(struct snd_card *card,
-				     struct snd_rme9652 *rme9652,
-				     int precise_ptr)
+static int snd_rme9652_create(struct snd_card *card,
+			      struct snd_rme9652 *rme9652,
+			      int precise_ptr)
 {
 	struct pci_dev *pci = rme9652->pci;
 	int err;
@@ -2578,8 +2572,8 @@ static void snd_rme9652_card_free(struct snd_card *card)
 		snd_rme9652_free(rme9652);
 }
 
-static int __devinit snd_rme9652_probe(struct pci_dev *pci,
-				       const struct pci_device_id *pci_id)
+static int snd_rme9652_probe(struct pci_dev *pci,
+			     const struct pci_device_id *pci_id)
 {
 	static int dev;
 	struct snd_rme9652 *rme9652;
@@ -2625,28 +2619,16 @@ static int __devinit snd_rme9652_probe(struct pci_dev *pci,
 	return 0;
 }
 
-static void __devexit snd_rme9652_remove(struct pci_dev *pci)
+static void snd_rme9652_remove(struct pci_dev *pci)
 {
 	snd_card_free(pci_get_drvdata(pci));
-	pci_set_drvdata(pci, NULL);
 }
 
-static struct pci_driver driver = {
+static struct pci_driver rme9652_driver = {
 	.name	  = KBUILD_MODNAME,
 	.id_table = snd_rme9652_ids,
 	.probe	  = snd_rme9652_probe,
-	.remove	  = __devexit_p(snd_rme9652_remove),
+	.remove	  = snd_rme9652_remove,
 };
 
-static int __init alsa_card_hammerfall_init(void)
-{
-	return pci_register_driver(&driver);
-}
-
-static void __exit alsa_card_hammerfall_exit(void)
-{
-	pci_unregister_driver(&driver);
-}
-
-module_init(alsa_card_hammerfall_init)
-module_exit(alsa_card_hammerfall_exit)
+module_pci_driver(rme9652_driver);

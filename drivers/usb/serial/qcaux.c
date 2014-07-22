@@ -16,7 +16,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/tty.h>
 #include <linux/module.h>
 #include <linux/usb.h>
@@ -54,7 +53,7 @@
 #define SAMSUNG_VENDOR_ID			0x04e8
 #define SAMSUNG_PRODUCT_U520			0x6640 /* SCH-U520 */
 
-static struct usb_device_id id_table[] = {
+static const struct usb_device_id id_table[] = {
 	{ USB_DEVICE_AND_INTERFACE_INFO(UTSTARCOM_VENDOR_ID, UTSTARCOM_PRODUCT_PC5740, 0xff, 0x00, 0x00) },
 	{ USB_DEVICE_AND_INTERFACE_INFO(UTSTARCOM_VENDOR_ID, UTSTARCOM_PRODUCT_PC5750, 0xff, 0x00, 0x00) },
 	{ USB_DEVICE_AND_INTERFACE_INFO(UTSTARCOM_VENDOR_ID, UTSTARCOM_PRODUCT_UM150, 0xff, 0x00, 0x00) },
@@ -74,43 +73,18 @@ static struct usb_device_id id_table[] = {
 };
 MODULE_DEVICE_TABLE(usb, id_table);
 
-static struct usb_driver qcaux_driver = {
-	.name =		"qcaux",
-	.probe =	usb_serial_probe,
-	.disconnect =	usb_serial_disconnect,
-	.id_table =	id_table,
-	.no_dynamic_id = 	1,
-};
-
 static struct usb_serial_driver qcaux_device = {
 	.driver = {
 		.owner =	THIS_MODULE,
 		.name =		"qcaux",
 	},
 	.id_table =		id_table,
-	.usb_driver =		&qcaux_driver,
 	.num_ports =		1,
 };
 
-static int __init qcaux_init(void)
-{
-	int retval;
+static struct usb_serial_driver * const serial_drivers[] = {
+	&qcaux_device, NULL
+};
 
-	retval = usb_serial_register(&qcaux_device);
-	if (retval)
-		return retval;
-	retval = usb_register(&qcaux_driver);
-	if (retval)
-		usb_serial_deregister(&qcaux_device);
-	return retval;
-}
-
-static void __exit qcaux_exit(void)
-{
-	usb_deregister(&qcaux_driver);
-	usb_serial_deregister(&qcaux_device);
-}
-
-module_init(qcaux_init);
-module_exit(qcaux_exit);
+module_usb_serial_driver(serial_drivers, id_table);
 MODULE_LICENSE("GPL");

@@ -22,21 +22,16 @@
 #include <asm/uaccess.h>
 #include "xfs.h"
 #include "xfs_fs.h"
-#include "xfs_bit.h"
-#include "xfs_log.h"
-#include "xfs_inum.h"
-#include "xfs_trans.h"
+#include "xfs_format.h"
+#include "xfs_log_format.h"
+#include "xfs_trans_resv.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
 #include "xfs_mount.h"
-#include "xfs_bmap_btree.h"
 #include "xfs_vnode.h"
-#include "xfs_dinode.h"
 #include "xfs_inode.h"
 #include "xfs_itable.h"
 #include "xfs_error.h"
-#include "xfs_dfrag.h"
-#include "xfs_vnodeops.h"
 #include "xfs_fsops.h"
 #include "xfs_alloc.h"
 #include "xfs_rtalloc.h"
@@ -293,7 +288,7 @@ xfs_compat_ioc_bulkstat(
 		int res;
 
 		error = xfs_bulkstat_one_compat(mp, inlast, bulkreq.ubuffer,
-				sizeof(compat_xfs_bstat_t), 0, &res);
+				sizeof(compat_xfs_bstat_t), NULL, &res);
 	} else if (cmd == XFS_IOC_FSBULKSTAT_32) {
 		error = xfs_bulkstat(mp, &inlast, &count,
 			xfs_bulkstat_one_compat, sizeof(compat_xfs_bstat_t),
@@ -376,7 +371,7 @@ xfs_compat_attrlist_by_handle(
 		return PTR_ERR(dentry);
 
 	error = -ENOMEM;
-	kbuf = kmalloc(al_hreq.buflen, GFP_KERNEL);
+	kbuf = kmem_zalloc_large(al_hreq.buflen, KM_SLEEP);
 	if (!kbuf)
 		goto out_dput;
 
@@ -389,9 +384,9 @@ xfs_compat_attrlist_by_handle(
 	if (copy_to_user(compat_ptr(al_hreq.buffer), kbuf, al_hreq.buflen))
 		error = -EFAULT;
 
- out_kfree:
-	kfree(kbuf);
- out_dput:
+out_kfree:
+	kmem_free(kbuf);
+out_dput:
 	dput(dentry);
 	return error;
 }
@@ -455,23 +450,23 @@ xfs_compat_attrmulti_by_handle(
 					&ops[i].am_length, ops[i].am_flags);
 			break;
 		case ATTR_OP_SET:
-			ops[i].am_error = mnt_want_write(parfilp->f_path.mnt);
+			ops[i].am_error = mnt_want_write_file(parfilp);
 			if (ops[i].am_error)
 				break;
 			ops[i].am_error = xfs_attrmulti_attr_set(
 					dentry->d_inode, attr_name,
 					compat_ptr(ops[i].am_attrvalue),
 					ops[i].am_length, ops[i].am_flags);
-			mnt_drop_write(parfilp->f_path.mnt);
+			mnt_drop_write_file(parfilp);
 			break;
 		case ATTR_OP_REMOVE:
-			ops[i].am_error = mnt_want_write(parfilp->f_path.mnt);
+			ops[i].am_error = mnt_want_write_file(parfilp);
 			if (ops[i].am_error)
 				break;
 			ops[i].am_error = xfs_attrmulti_attr_remove(
 					dentry->d_inode, attr_name,
 					ops[i].am_flags);
-			mnt_drop_write(parfilp->f_path.mnt);
+			mnt_drop_write_file(parfilp);
 			break;
 		default:
 			ops[i].am_error = EINVAL;
@@ -533,7 +528,7 @@ xfs_file_compat_ioctl(
 	unsigned		cmd,
 	unsigned long		p)
 {
-	struct inode		*inode = filp->f_path.dentry->d_inode;
+	struct inode		*inode = file_inode(filp);
 	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	void			__user *arg = (void __user *)p;
@@ -603,7 +598,11 @@ xfs_file_compat_ioctl(
 
 		if (xfs_compat_growfs_data_copyin(&in, arg))
 			return -XFS_ERROR(EFAULT);
+		error = mnt_want_write_file(filp);
+		if (error)
+			return error;
 		error = xfs_growfs_data(mp, &in);
+		mnt_drop_write_file(filp);
 		return -error;
 	}
 	case XFS_IOC_FSGROWFSRT_32: {
@@ -611,7 +610,11 @@ xfs_file_compat_ioctl(
 
 		if (xfs_compat_growfs_rt_copyin(&in, arg))
 			return -XFS_ERROR(EFAULT);
+		error = mnt_want_write_file(filp);
+		if (error)
+			return error;
 		error = xfs_growfs_rt(mp, &in);
+		mnt_drop_write_file(filp);
 		return -error;
 	}
 #endif
@@ -630,7 +633,11 @@ xfs_file_compat_ioctl(
 				   offsetof(struct xfs_swapext, sx_stat)) ||
 		    xfs_ioctl32_bstat_copyin(&sxp.sx_stat, &sxu->sx_stat))
 			return -XFS_ERROR(EFAULT);
-		error = xfs_swapext(&sxp);
+		error = mnt_want_write_file(filp);
+		if (error)
+			return error;
+		error = xfs_ioc_swapext(&sxp);
+		mnt_drop_write_file(filp);
 		return -error;
 	}
 	case XFS_IOC_FSBULKSTAT_32:

@@ -26,6 +26,7 @@
 #include <net/ip.h>
 #include <net/pkt_sched.h>
 #include <net/inet_ecn.h>
+#include <net/flow_keys.h>
 
 /*
  * SFB uses two B[l][n] : L x N arrays of bins (L levels, N bins per level)
@@ -219,7 +220,7 @@ static u32 sfb_compute_qlen(u32 *prob_r, u32 *avgpm_r, const struct sfb_sched_da
 
 static void sfb_init_perturbation(u32 slot, struct sfb_sched_data *q)
 {
-	q->bins[slot].perturbation = net_random();
+	q->bins[slot].perturbation = prandom_u32();
 }
 
 static void sfb_swap_slot(struct sfb_sched_data *q)
@@ -285,6 +286,7 @@ static int sfb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	u32 minqlen = ~0;
 	u32 r, slot, salt, sfbhash;
 	int ret = NET_XMIT_SUCCESS | __NET_XMIT_BYPASS;
+	struct flow_keys keys;
 
 	if (unlikely(sch->q.qlen >= q->limit)) {
 		sch->qstats.overlimits++;
@@ -308,13 +310,19 @@ static int sfb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		/* If using external classifiers, get result and record it. */
 		if (!sfb_classify(skb, q, &ret, &salt))
 			goto other_drop;
+		keys.src = salt;
+		keys.dst = 0;
+		keys.ports = 0;
 	} else {
-		salt = skb_get_rxhash(skb);
+		skb_flow_dissect(skb, &keys);
 	}
 
 	slot = q->slot;
 
-	sfbhash = jhash_1word(salt, q->bins[slot].perturbation);
+	sfbhash = jhash_3words((__force u32)keys.dst,
+			       (__force u32)keys.src,
+			       (__force u32)keys.ports,
+			       q->bins[slot].perturbation);
 	if (!sfbhash)
 		sfbhash = 1;
 	sfb_skb_cb(skb)->hashes[slot] = sfbhash;
@@ -346,7 +354,10 @@ static int sfb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	if (unlikely(p_min >= SFB_MAX_PROB)) {
 		/* Inelastic flow */
 		if (q->double_buffering) {
-			sfbhash = jhash_1word(salt, q->bins[slot].perturbation);
+			sfbhash = jhash_3words((__force u32)keys.dst,
+					       (__force u32)keys.src,
+					       (__force u32)keys.ports,
+					       q->bins[slot].perturbation);
 			if (!sfbhash)
 				sfbhash = 1;
 			sfb_skb_cb(skb)->hashes[slot] = sfbhash;
@@ -370,7 +381,7 @@ static int sfb_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		goto enqueue;
 	}
 
-	r = net_random() & SFB_MAX_PROB;
+	r = prandom_u32() & SFB_MAX_PROB;
 
 	if (unlikely(r < p_min)) {
 		if (unlikely(p_min > SFB_MAX_PROB / 2)) {
@@ -561,7 +572,8 @@ static int sfb_dump(struct Qdisc *sch, struct sk_buff *skb)
 	opts = nla_nest_start(skb, TCA_OPTIONS);
 	if (opts == NULL)
 		goto nla_put_failure;
-	NLA_PUT(skb, TCA_SFB_PARMS, sizeof(opt), &opt);
+	if (nla_put(skb, TCA_SFB_PARMS, sizeof(opt), &opt))
+		goto nla_put_failure;
 	return nla_nest_end(skb, opts);
 
 nla_put_failure:

@@ -28,6 +28,7 @@
  * (at your option) any later version.
  */
 
+#include <linux/linkage.h>
 #include <asm/alternative-asm.h>
 
 #define CTX	%rdi	// arg1
@@ -71,10 +72,8 @@
  * param: function's name
  */
 .macro SHA1_VECTOR_ASM  name
-	.global	\name
-	.type	\name, @function
-	.align 32
-\name:
+	ENTRY(\name)
+
 	push	%rbx
 	push	%rbp
 	push	%r14
@@ -109,7 +108,7 @@
 	pax_force_retaddr
 	ret
 
-	.size	\name, .-\name
+	ENDPROC(\name)
 .endm
 
 /*
@@ -471,7 +470,7 @@ W_PRECALC_SSSE3
  */
 SHA1_VECTOR_ASM     sha1_transform_ssse3
 
-#ifdef SHA1_ENABLE_AVX_SUPPORT
+#ifdef CONFIG_AS_AVX
 
 .macro W_PRECALC_AVX
 

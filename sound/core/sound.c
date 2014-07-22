@@ -27,7 +27,6 @@
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/info.h>
-#include <sound/version.h>
 #include <sound/control.h>
 #include <sound/initval.h>
 #include <linux/kmod.h>
@@ -103,6 +102,9 @@ static void snd_request_other(int minor)
  * This function increments the reference counter of the card instance
  * if an associated instance with the given minor number and type is found.
  * The caller must call snd_card_unref() appropriately later.
+ *
+ * Return: The user data pointer if the specified device is found. %NULL
+ * otherwise.
  */
 void *snd_lookup_minor_data(unsigned int minor, int type)
 {
@@ -151,7 +153,7 @@ static int snd_open(struct inode *inode, struct file *file)
 {
 	unsigned int minor = iminor(inode);
 	struct snd_minor *mptr = NULL;
-	const struct file_operations *old_fops;
+	const struct file_operations *new_fops;
 	int err = 0;
 
 	if (minor >= ARRAY_SIZE(snd_minors))
@@ -165,24 +167,14 @@ static int snd_open(struct inode *inode, struct file *file)
 			return -ENODEV;
 		}
 	}
-	old_fops = file->f_op;
-	file->f_op = fops_get(mptr->f_ops);
-	if (file->f_op == NULL) {
-		file->f_op = old_fops;
-		err = -ENODEV;
-	}
+	new_fops = fops_get(mptr->f_ops);
 	mutex_unlock(&sound_mutex);
-	if (err < 0)
-		return err;
+	if (!new_fops)
+		return -ENODEV;
+	replace_fops(file, new_fops);
 
-	if (file->f_op->open) {
+	if (file->f_op->open)
 		err = file->f_op->open(inode, file);
-		if (err) {
-			fops_put(file->f_op);
-			file->f_op = fops_get(old_fops);
-		}
-	}
-	fops_put(old_fops);
 	return err;
 }
 
@@ -235,6 +227,7 @@ static int snd_kernel_minor(int type, struct snd_card *card, int dev)
 	case SNDRV_DEVICE_TYPE_RAWMIDI:
 	case SNDRV_DEVICE_TYPE_PCM_PLAYBACK:
 	case SNDRV_DEVICE_TYPE_PCM_CAPTURE:
+	case SNDRV_DEVICE_TYPE_COMPRESS:
 		if (snd_BUG_ON(!card))
 			return -EINVAL;
 		minor = SNDRV_MINOR(card->number, type + dev);
@@ -261,7 +254,7 @@ static int snd_kernel_minor(int type, struct snd_card *card, int dev)
  * Registers an ALSA device file for the given card.
  * The operators have to be set in reg parameter.
  *
- * Returns zero if successful, or a negative error code on failure.
+ * Return: Zero if successful, or a negative error code on failure.
  */
 int snd_register_device_for_dev(int type, struct snd_card *card, int dev,
 				const struct file_operations *f_ops,
@@ -339,7 +332,7 @@ static int find_snd_minor(int type, struct snd_card *card, int dev)
  * Unregisters the device file already registered via
  * snd_register_device().
  *
- * Returns zero if sucecessful, or a negative error code on failure
+ * Return: Zero if successful, or a negative error code on failure.
  */
 int snd_unregister_device(int type, struct snd_card *card, int dev)
 {
@@ -474,7 +467,7 @@ static int __init alsa_sound_init(void)
 	}
 	snd_info_minor_register();
 #ifndef MODULE
-	printk(KERN_INFO "Advanced Linux Sound Architecture Driver Version " CONFIG_SND_VERSION CONFIG_SND_DATE ".\n");
+	printk(KERN_INFO "Advanced Linux Sound Architecture Driver Initialized.\n");
 #endif
 	return 0;
 }

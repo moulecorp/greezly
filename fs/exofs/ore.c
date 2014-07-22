@@ -431,8 +431,12 @@ int ore_check_io(struct ore_io_state *ios, ore_on_dev_error on_dev_error)
 		if (likely(!ret))
 			continue;
 
-		if (OSD_ERR_PRI_CLEAR_PAGES == osi.osd_err_pri) {
-			/* start read offset passed endof file */
+		if ((OSD_ERR_PRI_CLEAR_PAGES == osi.osd_err_pri) &&
+		    per_dev->bio) {
+			/* start read offset passed endof file.
+			 * Note: if we do not have bio it means read-attributes
+			 * In this case we should return error to caller.
+			 */
 			_clear_bio(per_dev->bio);
 			ORE_DBGMSG("start read offset passed end of file "
 				"offset=0x%llx, length=0x%llx\n",
@@ -827,8 +831,8 @@ static int _write_mirror(struct ore_io_state *ios, int cur_comp)
 			struct bio *bio;
 
 			if (per_dev != master_dev) {
-				bio = bio_kmalloc(GFP_KERNEL,
-						  master_dev->bio->bi_max_vecs);
+				bio = bio_clone_kmalloc(master_dev->bio,
+							GFP_KERNEL);
 				if (unlikely(!bio)) {
 					ORE_DBGMSG(
 					      "Failed to allocate BIO size=%u\n",
@@ -837,7 +841,6 @@ static int _write_mirror(struct ore_io_state *ios, int cur_comp)
 					goto out;
 				}
 
-				__bio_clone(bio, master_dev->bio);
 				bio->bi_bdev = NULL;
 				bio->bi_next = NULL;
 				per_dev->offset = master_dev->offset;

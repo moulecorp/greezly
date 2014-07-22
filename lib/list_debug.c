@@ -6,8 +6,11 @@
  * DEBUG_LIST.
  */
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/list.h>
+#include <linux/bug.h>
+#include <linux/kernel.h>
+#include <linux/rculist.h>
 #include <linux/mm.h>
 
 #ifdef CONFIG_DEBUG_LIST
@@ -115,6 +118,22 @@ void list_del(struct list_head *entry)
 	entry->prev = LIST_POISON2;
 }
 EXPORT_SYMBOL(list_del);
+
+/*
+ * RCU variants.
+ */
+void __list_add_rcu(struct list_head *new,
+		    struct list_head *prev, struct list_head *next)
+{
+	if (!__list_add_debug(new, prev, next))
+		return;
+
+	new->next = next;
+	new->prev = prev;
+	rcu_assign_pointer(list_next_rcu(prev), new);
+	next->prev = new;
+}
+EXPORT_SYMBOL(__list_add_rcu);
 #endif
 
 void __pax_list_add(struct list_head *new, struct list_head *prev, struct list_head *next)

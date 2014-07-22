@@ -69,13 +69,6 @@ gr_handle_proc_ptrace(struct task_struct *task)
 	return 0;
 }
 
-void
-gr_learn_resource(const struct task_struct *task,
-		  const int res, const unsigned long wanted, const int gt)
-{
-	return;
-}
-
 int
 gr_set_acls(const int type)
 {
@@ -144,7 +137,7 @@ gr_check_crash_exec(const struct file *filp)
 }
 
 int
-gr_check_crash_uid(const uid_t uid)
+gr_check_crash_uid(const kuid_t uid)
 {
 	return 0;
 }
@@ -292,7 +285,7 @@ gr_acl_handle_mkdir(const struct dentry * new_dentry,
 __u32
 gr_acl_handle_symlink(const struct dentry * new_dentry,
 		      const struct dentry * parent_dentry,
-		      const struct vfsmount * parent_mnt, const char *from)
+		      const struct vfsmount * parent_mnt, const struct filename *from)
 {
 	return 1;
 }
@@ -302,7 +295,7 @@ gr_acl_handle_link(const struct dentry * new_dentry,
 		   const struct dentry * parent_dentry,
 		   const struct vfsmount * parent_mnt,
 		   const struct dentry * old_dentry,
-		   const struct vfsmount * old_mnt, const char *to)
+		   const struct vfsmount * old_mnt, const struct filename *to)
 {
 	return 1;
 }
@@ -313,7 +306,7 @@ gr_acl_handle_rename(const struct dentry *new_dentry,
 		     const struct vfsmount *parent_mnt,
 		     const struct dentry *old_dentry,
 		     const struct inode *old_parent_inode,
-		     const struct vfsmount *old_mnt, const char *newname)
+		     const struct vfsmount *old_mnt, const struct filename *newname)
 {
 	return 0;
 }
@@ -327,7 +320,7 @@ gr_acl_handle_filldir(const struct file *file, const char *name,
 
 int
 gr_handle_shmat(const pid_t shm_cprid, const pid_t shm_lapid,
-		const time_t shm_createtime, const uid_t cuid, const int shmid)
+		const time_t shm_createtime, const kuid_t cuid, const int shmid)
 {
 	return 1;
 }
@@ -384,7 +377,7 @@ gr_acl_handle_mprotect(const struct file *file, const unsigned long prot)
 }
 
 void
-gr_set_role_label(const uid_t uid, const gid_t gid)
+gr_set_role_label(const kuid_t uid, const kgid_t gid)
 {
 	return;
 }
@@ -408,13 +401,13 @@ gr_search_udp_sendmsg(const struct sock *sk, const struct sockaddr_in *addr)
 }
 
 int
-gr_check_user_change(int real, int effective, int fs)
+gr_check_user_change(kuid_t real, kuid_t effective, kuid_t fs)
 {
 	return 0;
 }
 
 int
-gr_check_group_change(int real, int effective, int fs)
+gr_check_group_change(kgid_t real, kgid_t effective, kgid_t fs)
 {
 	return 0;
 }
@@ -434,7 +427,6 @@ void gr_put_exec_file(struct task_struct *task)
 	return;
 }
 
-EXPORT_SYMBOL_GPL(gr_learn_resource);
 #ifdef CONFIG_SECURITY
 EXPORT_SYMBOL_GPL(gr_check_user_change);
 EXPORT_SYMBOL_GPL(gr_check_group_change);

@@ -290,13 +290,11 @@
 					interrupt-parent = <&gef_pic>;
 					interrupts = <0x9 0x4>;
 					reg = <1>;
-					device_type = "ethernet-phy";
 				};
 				phy2: ethernet-phy@2 {
 					interrupt-parent = <&gef_pic>;
 					interrupts = <0x8 0x4>;
 					reg = <3>;
-					device_type = "ethernet-phy";
 				};
 				tbi0: tbi-phy@11 {
 					reg = <0x11>;
@@ -337,7 +335,7 @@
 		serial0: serial@4500 {
 			cell-index = <0>;
 			device_type = "serial";
-			compatible = "ns16550";
+			compatible = "fsl,ns16550", "ns16550";
 			reg = <0x4500 0x100>;
 			clock-frequency = <0>;
 			interrupts = <0x2a 0x2>;
@@ -347,7 +345,7 @@
 		serial1: serial@4600 {
 			cell-index = <1>;
 			device_type = "serial";
-			compatible = "ns16550";
+			compatible = "fsl,ns16550", "ns16550";
 			reg = <0x4600 0x100>;
 			clock-frequency = <0>;
 			interrupts = <0x1c 0x2>;

@@ -102,7 +102,7 @@ static int vortex_debug = 1;
 #include <linux/delay.h>
 
 
-static const char version[] __devinitconst =
+static const char version[] =
 	DRV_NAME ": Donald Becker and others.\n";
 
 MODULE_AUTHOR("Donald Becker <becker@scyld.com>");
@@ -277,7 +277,7 @@ static struct vortex_chip_info {
 	int flags;
 	int drv_flags;
 	int io_size;
-} vortex_info_tbl[] __devinitdata = {
+} vortex_info_tbl[] = {
 	{"3c590 Vortex 10Mbps",
 	 PCI_USES_MASTER, IS_VORTEX, 32, },
 	{"3c592 EISA 10Mbps Demon/Vortex",					/* AKPM: from Don's 3c59x_cb.c 0.49H */
@@ -693,7 +693,7 @@ DEFINE_WINDOW_IO(16)
 DEFINE_WINDOW_IO(32)
 
 #ifdef CONFIG_PCI
-#define DEVICE_PCI(dev) (((dev)->bus == &pci_bus_type) ? to_pci_dev((dev)) : NULL)
+#define DEVICE_PCI(dev) ((dev_is_pci(dev)) ? to_pci_dev((dev)) : NULL)
 #else
 #define DEVICE_PCI(dev) NULL
 #endif
@@ -930,7 +930,7 @@ static int __init vortex_eisa_probe(struct device *device)
 	return 0;
 }
 
-static int __devexit vortex_eisa_remove(struct device *device)
+static int vortex_eisa_remove(struct device *device)
 {
 	struct eisa_device *edev;
 	struct net_device *dev;
@@ -961,7 +961,7 @@ static struct eisa_driver vortex_eisa_driver = {
 	.driver   = {
 		.name    = "3c59x",
 		.probe   = vortex_eisa_probe,
-		.remove  = __devexit_p(vortex_eisa_remove)
+		.remove  = vortex_eisa_remove
 	}
 };
 
@@ -999,8 +999,8 @@ static int __init vortex_eisa_init(void)
 }
 
 /* returns count (>= 0), or negative on error */
-static int __devinit vortex_init_one(struct pci_dev *pdev,
-				      const struct pci_device_id *ent)
+static int vortex_init_one(struct pci_dev *pdev,
+			   const struct pci_device_id *ent)
 {
 	int rc, unit, pci_bar;
 	struct vortex_chip_info *vci;
@@ -1012,10 +1012,8 @@ static int __devinit vortex_init_one(struct pci_dev *pdev,
 		goto out;
 
 	rc = pci_request_regions(pdev, DRV_NAME);
-	if (rc < 0) {
-		pci_disable_device(pdev);
-		goto out;
-	}
+	if (rc < 0)
+		goto out_disable;
 
 	unit = vortex_cards_found;
 
@@ -1032,23 +1030,24 @@ static int __devinit vortex_init_one(struct pci_dev *pdev,
 	if (!ioaddr) /* If mapping fails, fall-back to BAR 0... */
 		ioaddr = pci_iomap(pdev, 0, 0);
 	if (!ioaddr) {
-		pci_release_regions(pdev);
-		pci_disable_device(pdev);
 		rc = -ENOMEM;
-		goto out;
+		goto out_release;
 	}
 
 	rc = vortex_probe1(&pdev->dev, ioaddr, pdev->irq,
 			   ent->driver_data, unit);
-	if (rc < 0) {
-		pci_iounmap(pdev, ioaddr);
-		pci_release_regions(pdev);
-		pci_disable_device(pdev);
-		goto out;
-	}
+	if (rc < 0)
+		goto out_iounmap;
 
 	vortex_cards_found++;
+	goto out;
 
+out_iounmap:
+	pci_iounmap(pdev, ioaddr);
+out_release:
+	pci_release_regions(pdev);
+out_disable:
+	pci_disable_device(pdev);
 out:
 	return rc;
 }
@@ -1095,9 +1094,8 @@ static const struct net_device_ops vortex_netdev_ops = {
  *
  * NOTE: pdev can be NULL, for the case of a Compaq device
  */
-static int __devinit vortex_probe1(struct device *gendev,
-				   void __iomem *ioaddr, int irq,
-				   int chip_idx, int card_idx)
+static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
+			 int chip_idx, int card_idx)
 {
 	struct vortex_private *vp;
 	int option;
@@ -1128,10 +1126,9 @@ static int __devinit vortex_probe1(struct device *gendev,
 
 	dev = alloc_etherdev(sizeof(*vp));
 	retval = -ENOMEM;
-	if (!dev) {
-		pr_err(PFX "unable to allocate etherdev, aborting\n");
+	if (!dev)
 		goto out;
-	}
+
 	SET_NETDEV_DEV(dev, gendev);
 	vp = netdev_priv(dev);
 
@@ -1297,7 +1294,6 @@ static int __devinit vortex_probe1(struct device *gendev,
 		pr_cont(" ***INVALID CHECKSUM %4.4x*** ", checksum);
 	for (i = 0; i < 3; i++)
 		((__be16 *)dev->dev_addr)[i] = htons(eeprom[i + 10]);
-	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 	if (print_info)
 		pr_cont(" %pM", dev->dev_addr);
 	/* Unfortunately an all zero eeprom passes the checksum and this
@@ -1476,7 +1472,7 @@ static int __devinit vortex_probe1(struct device *gendev,
 
 	if (pdev) {
 		vp->pm_state_valid = 1;
- 		pci_save_state(VORTEX_PCI(vp));
+		pci_save_state(pdev);
  		acpi_set_WOL(dev);
 	}
 	retval = register_netdev(dev);
@@ -2083,10 +2079,12 @@ vortex_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		iowrite16(len, ioaddr + Wn7_MasterLen);
 		spin_unlock_irq(&vp->window_lock);
 		vp->tx_skb = skb;
+		skb_tx_timestamp(skb);
 		iowrite16(StartDMADown, ioaddr + EL3_CMD);
 		/* netif_wake_queue() will be called at the DMADone interrupt. */
 	} else {
 		/* ... and the packet rounded to a doubleword. */
+		skb_tx_timestamp(skb);
 		iowrite32_rep(ioaddr + TX_FIFO, skb->data, (skb->len + 3) >> 2);
 		dev_kfree_skb (skb);
 		if (ioread16(ioaddr + TxFree) > 1536) {
@@ -2216,6 +2214,7 @@ boomerang_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		prev_entry->status &= cpu_to_le32(~TxIntrUploaded);
 #endif
 	}
+	skb_tx_timestamp(skb);
 	iowrite16(DownUnstall, ioaddr + EL3_CMD);
 	spin_unlock_irqrestore(&vp->lock, flags);
 	return NETDEV_TX_OK;
@@ -2500,7 +2499,7 @@ static int vortex_rx(struct net_device *dev)
 			int pkt_len = rx_status & 0x1fff;
 			struct sk_buff *skb;
 
-			skb = dev_alloc_skb(pkt_len + 5);
+			skb = netdev_alloc_skb(dev, pkt_len + 5);
 			if (vortex_debug > 4)
 				pr_debug("Receiving packet size %d status %4.4x.\n",
 					   pkt_len, rx_status);
@@ -2579,7 +2578,8 @@ boomerang_rx(struct net_device *dev)
 
 			/* Check if the packet is long enough to just accept without
 			   copying to a properly sized skbuff. */
-			if (pkt_len < rx_copybreak && (skb = dev_alloc_skb(pkt_len + 2)) != NULL) {
+			if (pkt_len < rx_copybreak &&
+			    (skb = netdev_alloc_skb(dev, pkt_len + 2)) != NULL) {
 				skb_reserve(skb, 2);	/* Align IP on 16 byte boundaries */
 				pci_dma_sync_single_for_cpu(VORTEX_PCI(vp), dma, PKT_BUF_SZ, PCI_DMA_FROMDEVICE);
 				/* 'skb_put()' points to the start of sk_buff data area. */
@@ -2929,15 +2929,17 @@ static void vortex_get_drvinfo(struct net_device *dev,
 {
 	struct vortex_private *vp = netdev_priv(dev);
 
-	strcpy(info->driver, DRV_NAME);
+	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
 	if (VORTEX_PCI(vp)) {
-		strcpy(info->bus_info, pci_name(VORTEX_PCI(vp)));
+		strlcpy(info->bus_info, pci_name(VORTEX_PCI(vp)),
+			sizeof(info->bus_info));
 	} else {
 		if (VORTEX_EISA(vp))
-			strcpy(info->bus_info, dev_name(vp->gendev));
+			strlcpy(info->bus_info, dev_name(vp->gendev),
+				sizeof(info->bus_info));
 		else
-			sprintf(info->bus_info, "EISA 0x%lx %d",
-					dev->base_addr, dev->irq);
+			snprintf(info->bus_info, sizeof(info->bus_info),
+				"EISA 0x%lx %d", dev->base_addr, dev->irq);
 	}
 }
 
@@ -2987,6 +2989,7 @@ static const struct ethtool_ops vortex_ethtool_ops = {
 	.nway_reset             = vortex_nway_reset,
 	.get_wol                = vortex_get_wol,
 	.set_wol                = vortex_set_wol,
+	.get_ts_info		= ethtool_op_get_ts_info,
 };
 
 #ifdef CONFIG_PCI
@@ -3220,7 +3223,7 @@ static void acpi_set_WOL(struct net_device *dev)
 }
 
 
-static void __devexit vortex_remove_one(struct pci_dev *pdev)
+static void vortex_remove_one(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct vortex_private *vp;
@@ -3233,21 +3236,20 @@ static void __devexit vortex_remove_one(struct pci_dev *pdev)
 	vp = netdev_priv(dev);
 
 	if (vp->cb_fn_base)
-		pci_iounmap(VORTEX_PCI(vp), vp->cb_fn_base);
+		pci_iounmap(pdev, vp->cb_fn_base);
 
 	unregister_netdev(dev);
 
-	if (VORTEX_PCI(vp)) {
-		pci_set_power_state(VORTEX_PCI(vp), PCI_D0);	/* Go active */
-		if (vp->pm_state_valid)
-			pci_restore_state(VORTEX_PCI(vp));
-		pci_disable_device(VORTEX_PCI(vp));
-	}
+	pci_set_power_state(pdev, PCI_D0);	/* Go active */
+	if (vp->pm_state_valid)
+		pci_restore_state(pdev);
+	pci_disable_device(pdev);
+
 	/* Should really use issue_and_wait() here */
 	iowrite16(TotalReset | ((vp->drv_flags & EEPROM_RESET) ? 0x04 : 0x14),
 	     vp->ioaddr + EL3_CMD);
 
-	pci_iounmap(VORTEX_PCI(vp), vp->ioaddr);
+	pci_iounmap(pdev, vp->ioaddr);
 
 	pci_free_consistent(pdev,
 						sizeof(struct boom_rx_desc) * RX_RING_SIZE
@@ -3264,7 +3266,7 @@ static void __devexit vortex_remove_one(struct pci_dev *pdev)
 static struct pci_driver vortex_driver = {
 	.name		= "3c59x",
 	.probe		= vortex_init_one,
-	.remove		= __devexit_p(vortex_remove_one),
+	.remove		= vortex_remove_one,
 	.id_table	= vortex_pci_tbl,
 	.driver.pm	= VORTEX_PM_OPS,
 };
@@ -3292,7 +3294,6 @@ static int __init vortex_init(void)
 
 static void __exit vortex_eisa_cleanup(void)
 {
-	struct vortex_private *vp;
 	void __iomem *ioaddr;
 
 #ifdef CONFIG_EISA
@@ -3301,7 +3302,6 @@ static void __exit vortex_eisa_cleanup(void)
 #endif
 
 	if (compaq_net_device) {
-		vp = netdev_priv(compaq_net_device);
 		ioaddr = ioport_map(compaq_net_device->base_addr,
 		                    VORTEX_TOTAL_SIZE);
 

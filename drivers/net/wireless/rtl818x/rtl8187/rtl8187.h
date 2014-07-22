@@ -2,10 +2,10 @@
  * Definitions for RTL8187 hardware
  *
  * Copyright 2007 Michael Wu <flamingice@sourmilk.net>
- * Copyright 2007 Andrea Merello <andreamrl@tiscali.it>
+ * Copyright 2007 Andrea Merello <andrea.merello@gmail.com>
  *
  * Based on the r8187 driver, which is:
- * Copyright 2005 Andrea Merello <andreamrl@tiscali.it>, et al.
+ * Copyright 2005 Andrea Merello <andrea.merello@gmail.com>, et al.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -91,6 +91,14 @@ enum {
 	DEVICE_RTL8187B
 };
 
+struct rtl8187_vif {
+	struct ieee80211_hw *dev;
+
+	/* beaconing */
+	struct delayed_work beacon_work;
+	bool enable_beacon;
+};
+
 struct rtl8187_priv {
 	/* common between rtl818x drivers */
 	struct rtl818x_csr *map;
@@ -147,6 +155,7 @@ struct rtl8187_priv {
 		u8 dummy2[L1_CACHE_BYTES];
 	} *io_dmabuf ____cacheline_aligned;
 	bool rfkill_off;
+	u16 seqno;
 };
 
 void rtl8187_write_phy(struct ieee80211_hw *dev, u8 addr, u32 data);

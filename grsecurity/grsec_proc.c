@@ -10,10 +10,10 @@ int gr_proc_is_restricted(void)
 #endif
 
 #ifdef CONFIG_GRKERNSEC_PROC_USER
-	if (cred->fsuid)
+	if (!uid_eq(cred->fsuid, GLOBAL_ROOT_UID))
 		return -EACCES;
 #elif defined(CONFIG_GRKERNSEC_PROC_USERGROUP)
-	if (cred->fsuid && !in_group_p(grsec_proc_gid))
+	if (!uid_eq(cred->fsuid, GLOBAL_ROOT_UID) && !in_group_p(grsec_proc_gid))
 		return -EACCES;
 #endif
 	return 0;

@@ -37,11 +37,11 @@
 #include "octeon-ethernet.h"
 #include "ethernet-util.h"
 
-#include "cvmx-helper.h"
+#include <asm/octeon/cvmx-helper.h>
 
 #include <asm/octeon/cvmx-ipd-defs.h>
 #include <asm/octeon/cvmx-npi-defs.h>
-#include "cvmx-gmxx-defs.h"
+#include <asm/octeon/cvmx-gmxx-defs.h>
 
 DEFINE_SPINLOCK(global_register_lock);
 
@@ -373,9 +373,7 @@ int cvm_oct_rgmii_init(struct net_device *dev)
 			 * Enable interrupts on inband status changes
 			 * for this port.
 			 */
-			gmx_rx_int_en.u64 =
-			    cvmx_read_csr(CVMX_GMXX_RXX_INT_EN
-					  (index, interface));
+			gmx_rx_int_en.u64 = 0;
 			gmx_rx_int_en.s.phy_dupx = 1;
 			gmx_rx_int_en.s.phy_link = 1;
 			gmx_rx_int_en.s.phy_spd = 1;

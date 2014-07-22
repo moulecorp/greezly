@@ -1,4 +1,3 @@
-#include <linux/export.h>
 #include "dm.h"
 
 /*

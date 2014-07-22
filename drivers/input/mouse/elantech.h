@@ -20,6 +20,7 @@
 #define ETP_FW_VERSION_QUERY		0x01
 #define ETP_CAPABILITIES_QUERY		0x02
 #define ETP_SAMPLE_QUERY		0x03
+#define ETP_RESOLUTION_QUERY		0x04
 
 /*
  * Command values for register reading or writing
@@ -128,6 +129,7 @@ struct elantech_data {
 	bool paritycheck;
 	bool jumpy_cursor;
 	bool reports_pressure;
+	bool crc_enabled;
 	bool set_hw_resolution;
 	unsigned char hw_version;
 	unsigned int fw_version;
@@ -136,6 +138,7 @@ struct elantech_data {
 	unsigned int width;
 	struct finger_pos mt[ETP_MAX_FINGERS];
 	unsigned char parity[256];
+	int (*send_cmd)(struct psmouse *psmouse, unsigned char c, unsigned char *param);
 };
 
 #ifdef CONFIG_MOUSE_PS2_ELANTECH

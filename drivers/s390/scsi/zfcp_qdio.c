@@ -3,7 +3,7 @@
  *
  * Setup and helper functions to access QDIO.
  *
- * Copyright IBM Corporation 2002, 2010
+ * Copyright IBM Corp. 2002, 2010
  */
 
 #define KMSG_COMPONENT "zfcp"
@@ -16,9 +16,9 @@
 
 #define QBUFF_PER_PAGE		(PAGE_SIZE / sizeof(struct qdio_buffer))
 
-static bool enable_multibuffer;
+static bool enable_multibuffer = 1;
 module_param_named(datarouter, enable_multibuffer, bool, 0400);
-MODULE_PARM_DESC(datarouter, "Enable hardware data router support");
+MODULE_PARM_DESC(datarouter, "Enable hardware data router support (default on)");
 
 static int zfcp_qdio_buffers_enqueue(struct qdio_buffer **sbal)
 {
@@ -68,7 +68,7 @@ static inline void zfcp_qdio_account(struct zfcp_qdio *qdio)
 	unsigned long long now, span;
 	int used;
 
-	now = get_clock_monotonic();
+	now = get_tod_clock_monotonic();
 	span = (now - qdio->req_q_time) >> 12;
 	used = QDIO_MAX_BUFFERS_PER_Q - atomic_read(&qdio->req_q_free);
 	qdio->req_q_util += used * span;

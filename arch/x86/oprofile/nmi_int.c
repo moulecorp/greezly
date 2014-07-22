@@ -404,7 +404,7 @@ static void nmi_cpu_down(void *dummy)
 		nmi_cpu_shutdown(dummy);
 }
 
-static int nmi_create_files(struct super_block *sb, struct dentry *root)
+static int nmi_create_files(struct dentry *root)
 {
 	unsigned int i;
 
@@ -421,14 +421,14 @@ static int nmi_create_files(struct super_block *sb, struct dentry *root)
 			continue;
 
 		snprintf(buf,  sizeof(buf), "%d", i);
-		dir = oprofilefs_mkdir(sb, root, buf);
-		oprofilefs_create_ulong(sb, dir, "enabled", &counter_config[i].enabled);
-		oprofilefs_create_ulong(sb, dir, "event", &counter_config[i].event);
-		oprofilefs_create_ulong(sb, dir, "count", &counter_config[i].count);
-		oprofilefs_create_ulong(sb, dir, "unit_mask", &counter_config[i].unit_mask);
-		oprofilefs_create_ulong(sb, dir, "kernel", &counter_config[i].kernel);
-		oprofilefs_create_ulong(sb, dir, "user", &counter_config[i].user);
-		oprofilefs_create_ulong(sb, dir, "extra", &counter_config[i].extra);
+		dir = oprofilefs_mkdir(root, buf);
+		oprofilefs_create_ulong(dir, "enabled", &counter_config[i].enabled);
+		oprofilefs_create_ulong(dir, "event", &counter_config[i].event);
+		oprofilefs_create_ulong(dir, "count", &counter_config[i].count);
+		oprofilefs_create_ulong(dir, "unit_mask", &counter_config[i].unit_mask);
+		oprofilefs_create_ulong(dir, "kernel", &counter_config[i].kernel);
+		oprofilefs_create_ulong(dir, "user", &counter_config[i].user);
+		oprofilefs_create_ulong(dir, "extra", &counter_config[i].extra);
 	}
 
 	return 0;
@@ -596,24 +596,36 @@ static int __init p4_init(char **cpu_type)
 	return 0;
 }
 
-static int force_arch_perfmon;
-static int force_cpu_type(const char *str, struct kernel_param *kp)
+enum __force_cpu_type {
+	reserved = 0,		/* do not force */
+	timer,
+	arch_perfmon,
+};
+
+static int force_cpu_type;
+
+static int set_cpu_type(const char *str, struct kernel_param *kp)
 {
-	if (!strcmp(str, "arch_perfmon")) {
-		force_arch_perfmon = 1;
+	if (!strcmp(str, "timer")) {
+		force_cpu_type = timer;
+		printk(KERN_INFO "oprofile: forcing NMI timer mode\n");
+	} else if (!strcmp(str, "arch_perfmon")) {
+		force_cpu_type = arch_perfmon;
 		printk(KERN_INFO "oprofile: forcing architectural perfmon\n");
+	} else {
+		force_cpu_type = 0;
 	}
 
 	return 0;
 }
-module_param_call(cpu_type, force_cpu_type, NULL, NULL, 0);
+module_param_call(cpu_type, set_cpu_type, NULL, NULL, 0);
 
 static int __init ppro_init(char **cpu_type)
 {
 	__u8 cpu_model = boot_cpu_data.x86_model;
 	struct op_x86_model_spec *spec = &op_ppro_spec;	/* default */
 
-	if (force_arch_perfmon && cpu_has_arch_perfmon)
+	if (force_cpu_type == arch_perfmon && cpu_has_arch_perfmon)
 		return 0;
 
 	/*
@@ -678,6 +690,9 @@ int __init op_nmi_init(struct oprofile_operations *ops)
 	int ret = 0;
 
 	if (!cpu_has_apic)
+		return -ENODEV;
+
+	if (force_cpu_type == timer)
 		return -ENODEV;
 
 	switch (vendor) {

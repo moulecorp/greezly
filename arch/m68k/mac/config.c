@@ -26,11 +26,11 @@
 #include <linux/adb.h>
 #include <linux/cuda.h>
 
-#define BOOTINFO_COMPAT_1_0
 #include <asm/setup.h>
 #include <asm/bootinfo.h>
+#include <asm/bootinfo-mac.h>
+#include <asm/byteorder.h>
 
-#include <asm/system.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/pgtable.h>
@@ -53,7 +53,7 @@ struct mac_booter_data mac_bi_data;
 static unsigned long mac_orig_videoaddr;
 
 /* Mac specific timer functions */
-extern unsigned long mac_gettimeoffset(void);
+extern u32 mac_gettimeoffset(void);
 extern int mac_hwclk(int, struct rtc_time *);
 extern int mac_set_clock_mmss(unsigned long);
 extern void iop_preinit(void);
@@ -71,6 +71,31 @@ static void mac_get_model(char *str);
 static void mac_identify(void);
 static void mac_report_hardware(void);
 
+#ifdef CONFIG_EARLY_PRINTK
+asmlinkage void __init mac_early_print(const char *s, unsigned n);
+
+static void __init mac_early_cons_write(struct console *con,
+                                 const char *s, unsigned n)
+{
+	mac_early_print(s, n);
+}
+
+static struct console __initdata mac_early_cons = {
+	.name  = "early",
+	.write = mac_early_cons_write,
+	.flags = CON_PRINTBUFFER | CON_BOOT,
+	.index = -1
+};
+
+int __init mac_unregister_early_cons(void)
+{
+	/* mac_early_print can't be used after init sections are discarded */
+	return unregister_console(&mac_early_cons);
+}
+
+late_initcall(mac_unregister_early_cons);
+#endif
+
 static void __init mac_sched_init(irq_handler_t vector)
 {
 	via_init_clock(vector);
@@ -83,45 +108,46 @@ static void __init mac_sched_init(irq_handler_t vector)
 int __init mac_parse_bootinfo(const struct bi_record *record)
 {
 	int unknown = 0;
-	const u_long *data = record->data;
+	const void *data = record->data;
 
-	switch (record->tag) {
+	switch (be16_to_cpu(record->tag)) {
 	case BI_MAC_MODEL:
-		mac_bi_data.id = *data;
+		mac_bi_data.id = be32_to_cpup(data);
 		break;
 	case BI_MAC_VADDR:
-		mac_bi_data.videoaddr = *data;
+		mac_bi_data.videoaddr = be32_to_cpup(data);
 		break;
 	case BI_MAC_VDEPTH:
-		mac_bi_data.videodepth = *data;
+		mac_bi_data.videodepth = be32_to_cpup(data);
 		break;
 	case BI_MAC_VROW:
-		mac_bi_data.videorow = *data;
+		mac_bi_data.videorow = be32_to_cpup(data);
 		break;
 	case BI_MAC_VDIM:
-		mac_bi_data.dimensions = *data;
+		mac_bi_data.dimensions = be32_to_cpup(data);
 		break;
 	case BI_MAC_VLOGICAL:
-		mac_bi_data.videological = VIDEOMEMBASE + (*data & ~VIDEOMEMMASK);
-		mac_orig_videoaddr = *data;
+		mac_orig_videoaddr = be32_to_cpup(data);
+		mac_bi_data.videological =
+			VIDEOMEMBASE + (mac_orig_videoaddr & ~VIDEOMEMMASK);
 		break;
 	case BI_MAC_SCCBASE:
-		mac_bi_data.sccbase = *data;
+		mac_bi_data.sccbase = be32_to_cpup(data);
 		break;
 	case BI_MAC_BTIME:
-		mac_bi_data.boottime = *data;
+		mac_bi_data.boottime = be32_to_cpup(data);
 		break;
 	case BI_MAC_GMTBIAS:
-		mac_bi_data.gmtbias = *data;
+		mac_bi_data.gmtbias = be32_to_cpup(data);
 		break;
 	case BI_MAC_MEMSIZE:
-		mac_bi_data.memsize = *data;
+		mac_bi_data.memsize = be32_to_cpup(data);
 		break;
 	case BI_MAC_CPUID:
-		mac_bi_data.cpuid = *data;
+		mac_bi_data.cpuid = be32_to_cpup(data);
 		break;
 	case BI_MAC_ROMBASE:
-		mac_bi_data.rombase = *data;
+		mac_bi_data.rombase = be32_to_cpup(data);
 		break;
 	default:
 		unknown = 1;
@@ -153,7 +179,7 @@ void __init config_mac(void)
 	mach_sched_init = mac_sched_init;
 	mach_init_IRQ = mac_init_IRQ;
 	mach_get_model = mac_get_model;
-	mach_gettimeoffset = mac_gettimeoffset;
+	arch_gettimeoffset = mac_gettimeoffset;
 	mach_hwclk = mac_hwclk;
 	mach_set_clock_mmss = mac_set_clock_mmss;
 	mach_reset = mac_reset;
@@ -162,6 +188,10 @@ void __init config_mac(void)
 	mach_max_dma_address = 0xffffffff;
 #if defined(CONFIG_INPUT_M68K_BEEP) || defined(CONFIG_INPUT_M68K_BEEP_MODULE)
 	mach_beep = mac_mksound;
+#endif
+
+#ifdef CONFIG_EARLY_PRINTK
+	register_console(&mac_early_cons);
 #endif
 
 	/*
@@ -192,7 +222,7 @@ void __init config_mac(void)
  * inaccurate, so look here if a new Mac model won't run. Example: if
  * a Mac crashes immediately after the VIA1 registers have been dumped
  * to the screen, it probably died attempting to read DirB on a RBV.
- * Meaning it should have MAC_VIA_IIci here :-)
+ * Meaning it should have MAC_VIA_IICI here :-)
  */
 
 struct mac_model *macintosh_config;
@@ -267,7 +297,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_IICI,
 		.name		= "IIci",
 		.adb_type	= MAC_ADB_II,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -276,7 +306,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_IIFX,
 		.name		= "IIfx",
 		.adb_type	= MAC_ADB_IOP,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_IOP,
 		.nubus_type	= MAC_NUBUS,
@@ -285,7 +315,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_IISI,
 		.name		= "IIsi",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -294,7 +324,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_IIVI,
 		.name		= "IIvi",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -303,7 +333,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_IIVX,
 		.name		= "IIvx",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -318,7 +348,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_CLII,
 		.name		= "Classic II",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -327,7 +357,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_CCL,
 		.name		= "Color Classic",
 		.adb_type	= MAC_ADB_CUDA,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -336,7 +366,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_CCLII,
 		.name		= "Color Classic II",
 		.adb_type	= MAC_ADB_CUDA,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -351,7 +381,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_LC,
 		.name		= "LC",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -360,7 +390,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_LCII,
 		.name		= "LC II",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -369,7 +399,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_LCIII,
 		.name		= "LC III",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -497,7 +527,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_P460,
 		.name		= "Performa 460",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -524,7 +554,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_P520,
 		.name		= "Performa 520",
 		.adb_type	= MAC_ADB_CUDA,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -533,7 +563,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_P550,
 		.name		= "Performa 550",
 		.adb_type	= MAC_ADB_CUDA,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -565,7 +595,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_TV,
 		.name		= "TV",
 		.adb_type	= MAC_ADB_CUDA,
-		.via_type	= MAC_VIA_QUADRA,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -574,7 +604,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_P600,
 		.name		= "Performa 600",
 		.adb_type	= MAC_ADB_IISI,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_II,
 		.nubus_type	= MAC_NUBUS,
@@ -645,8 +675,8 @@ static struct mac_model mac_data_table[] = {
 	}, {
 		.ident		= MAC_MODEL_PB150,
 		.name		= "PowerBook 150",
-		.adb_type	= MAC_ADB_PB1,
-		.via_type	= MAC_VIA_IIci,
+		.adb_type	= MAC_ADB_PB2,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.ide_type	= MAC_IDE_PB,
 		.scc_type	= MAC_SCC_QUADRA,
@@ -732,17 +762,13 @@ static struct mac_model mac_data_table[] = {
 	 * PowerBook Duos are pretty much like normal PowerBooks
 	 * All of these probably have onboard SONIC in the Dock which
 	 * means we'll have to probe for it eventually.
-	 *
-	 * Are these really MAC_VIA_IIci? The developer notes for the
-	 * Duos show pretty much the same custom parts as in most of
-	 * the other PowerBooks which would imply MAC_VIA_QUADRA.
 	 */
 
 	{
 		.ident		= MAC_MODEL_PB210,
 		.name		= "PowerBook Duo 210",
 		.adb_type	= MAC_ADB_PB2,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_QUADRA,
 		.nubus_type	= MAC_NUBUS,
@@ -751,7 +777,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_PB230,
 		.name		= "PowerBook Duo 230",
 		.adb_type	= MAC_ADB_PB2,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_QUADRA,
 		.nubus_type	= MAC_NUBUS,
@@ -760,7 +786,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_PB250,
 		.name		= "PowerBook Duo 250",
 		.adb_type	= MAC_ADB_PB2,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_QUADRA,
 		.nubus_type	= MAC_NUBUS,
@@ -769,7 +795,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_PB270C,
 		.name		= "PowerBook Duo 270c",
 		.adb_type	= MAC_ADB_PB2,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_QUADRA,
 		.nubus_type	= MAC_NUBUS,
@@ -778,7 +804,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_PB280,
 		.name		= "PowerBook Duo 280",
 		.adb_type	= MAC_ADB_PB2,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_QUADRA,
 		.nubus_type	= MAC_NUBUS,
@@ -787,7 +813,7 @@ static struct mac_model mac_data_table[] = {
 		.ident		= MAC_MODEL_PB280C,
 		.name		= "PowerBook Duo 280c",
 		.adb_type	= MAC_ADB_PB2,
-		.via_type	= MAC_VIA_IIci,
+		.via_type	= MAC_VIA_IICI,
 		.scsi_type	= MAC_SCSI_OLD,
 		.scc_type	= MAC_SCC_QUADRA,
 		.nubus_type	= MAC_NUBUS,
@@ -864,8 +890,14 @@ static void __init mac_identify(void)
 		scc_b_rsrcs[1].start = scc_b_rsrcs[1].end = IRQ_MAC_SCC_B;
 		break;
 	default:
-		scc_a_rsrcs[1].start = scc_a_rsrcs[1].end = IRQ_MAC_SCC;
-		scc_b_rsrcs[1].start = scc_b_rsrcs[1].end = IRQ_MAC_SCC;
+		/* On non-PSC machines, the serial ports share an IRQ. */
+		if (macintosh_config->ident == MAC_MODEL_IIFX) {
+			scc_a_rsrcs[1].start = scc_a_rsrcs[1].end = IRQ_MAC_SCC;
+			scc_b_rsrcs[1].start = scc_b_rsrcs[1].end = IRQ_MAC_SCC;
+		} else {
+			scc_a_rsrcs[1].start = scc_a_rsrcs[1].end = IRQ_AUTO_4;
+			scc_b_rsrcs[1].start = scc_b_rsrcs[1].end = IRQ_AUTO_4;
+		}
 		break;
 	}
 

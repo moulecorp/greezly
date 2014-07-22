@@ -21,16 +21,18 @@
 
 int gr_handle_new_usb(void);
 
-void gr_handle_brute_attach(unsigned long mm_flags);
+void gr_handle_brute_attach(int dumpable);
 void gr_handle_brute_check(void);
 void gr_handle_kernel_exploit(void);
 
 char gr_roletype_to_char(void);
 
+int gr_proc_is_restricted(void);
+
 int gr_acl_enable_at_secure(void);
 
-int gr_check_user_change(int real, int effective, int fs);
-int gr_check_group_change(int real, int effective, int fs);
+int gr_check_user_change(kuid_t real, kuid_t effective, kuid_t fs);
+int gr_check_group_change(kgid_t real, kgid_t effective, kgid_t fs);
 
 void gr_del_task_from_ip_table(struct task_struct *p);
 
@@ -44,7 +46,7 @@ int gr_chroot_fchdir(struct dentry *u_dentry, struct vfsmount *u_mnt);
 int gr_chroot_fhandle(void);
 int gr_handle_chroot_chroot(const struct dentry *dentry,
 				   const struct vfsmount *mnt);
-void gr_handle_chroot_chdir(struct path *path);
+void gr_handle_chroot_chdir(const struct path *path);
 int gr_handle_chroot_chmod(const struct dentry *dentry,
 				  const struct vfsmount *mnt, const int mode);
 int gr_handle_chroot_mknod(const struct dentry *dentry,
@@ -65,9 +67,7 @@ umode_t gr_acl_umask(void);
 
 int gr_tpe_allow(const struct file *file);
 
-int gr_proc_is_restricted(void);
-
-void gr_set_chroot_entries(struct task_struct *task, struct path *path);
+void gr_set_chroot_entries(struct task_struct *task, const struct path *path);
 void gr_clear_chroot_entries(struct task_struct *task);
 
 void gr_log_forkfail(const int retval);
@@ -96,16 +96,17 @@ int gr_handle_fifo(const struct dentry *dentry,
 int gr_handle_hardlink(const struct dentry *dentry,
 			      const struct vfsmount *mnt,
 			      struct inode *inode,
-			      const int mode, const char *to);
+			      const int mode, const struct filename *to);
 
 int gr_is_capable(const int cap);
 int gr_is_capable_nolog(const int cap);
-void gr_learn_resource(const struct task_struct *task, const int limit,
-			      const unsigned long wanted, const int gt);
+int gr_task_is_capable(const struct task_struct *task, const struct cred *cred, const int cap);
+int gr_task_is_capable_nolog(const struct task_struct *task, const int cap);
+
 void gr_copy_label(struct task_struct *tsk);
 void gr_handle_crash(struct task_struct *task, const int sig);
 int gr_handle_signal(const struct task_struct *p, const int sig);
-int gr_check_crash_uid(const uid_t uid);
+int gr_check_crash_uid(const kuid_t uid);
 int gr_check_protected_task(const struct task_struct *task);
 int gr_check_protected_task_fowner(struct pid *pid, enum pid_type type);
 int gr_acl_handle_mmap(const struct file *file,
@@ -133,8 +134,8 @@ __u32 gr_acl_handle_execve(const struct dentry *dentry,
 				  const struct vfsmount *mnt);
 int gr_check_crash_exec(const struct file *filp);
 int gr_acl_is_enabled(void);
-void gr_set_role_label(struct task_struct *task, const uid_t uid,
-			      const gid_t gid);
+void gr_set_role_label(struct task_struct *task, const kuid_t uid,
+			      const kgid_t gid);
 int gr_set_proc_label(const struct dentry *dentry,
 			const struct vfsmount *mnt,
 			const int unsafe_flags);
@@ -165,19 +166,19 @@ __u32 gr_acl_handle_unlink(const struct dentry *dentry,
 __u32 gr_acl_handle_symlink(const struct dentry *new_dentry,
 				   const struct dentry *parent_dentry,
 				   const struct vfsmount *parent_mnt,
-				   const char *from);
+				   const struct filename *from);
 __u32 gr_acl_handle_link(const struct dentry *new_dentry,
 				const struct dentry *parent_dentry,
 				const struct vfsmount *parent_mnt,
 				const struct dentry *old_dentry,
-				const struct vfsmount *old_mnt, const char *to);
+				const struct vfsmount *old_mnt, const struct filename *to);
 int gr_handle_symlink_owner(const struct path *link, const struct inode *target);
 int gr_acl_handle_rename(struct dentry *new_dentry,
 				struct dentry *parent_dentry,
 				const struct vfsmount *parent_mnt,
 				struct dentry *old_dentry,
 				struct inode *old_parent_inode,
-				struct vfsmount *old_mnt, const char *newname);
+				struct vfsmount *old_mnt, const struct filename *newname);
 void gr_handle_rename(struct inode *old_dir, struct inode *new_dir,
 				struct dentry *old_dentry,
 				struct dentry *new_dentry,
@@ -203,6 +204,26 @@ void gr_put_exec_file(struct task_struct *task);
 
 int gr_ptrace_readexec(struct file *file, int unsafe_flags);
 
+#if defined(CONFIG_GRKERNSEC) && (defined(CONFIG_GRKERNSEC_RESLOG) || !defined(CONFIG_GRKERNSEC_NO_RBAC))
+extern void gr_learn_resource(const struct task_struct *task, const int res,
+			      const unsigned long wanted, const int gt);
+#else
+static inline void gr_learn_resource(const struct task_struct *task, const int res,
+				     const unsigned long wanted, const int gt)
+{
+}
+#endif
+
+#ifdef CONFIG_GRKERNSEC_RESLOG
+extern void gr_log_resource(const struct task_struct *task, const int res,
+				   const unsigned long wanted, const int gt);
+#else
+static inline void gr_log_resource(const struct task_struct *task, const int res,
+				   const unsigned long wanted, const int gt)
+{
+}
+#endif
+
 #ifdef CONFIG_GRKERNSEC
 void task_grsec_rbac(struct seq_file *m, struct task_struct *p);
 void gr_handle_vm86(void);
@@ -214,7 +235,7 @@ extern int grsec_enable_dmesg;
 extern int grsec_disable_privio;
 
 #ifdef CONFIG_GRKERNSEC_PROC_USERGROUP
-extern int grsec_proc_gid;
+extern kgid_t grsec_proc_gid;
 #endif
 
 #ifdef CONFIG_GRKERNSEC_CHROOT_FINDTASK

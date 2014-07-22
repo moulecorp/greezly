@@ -1,7 +1,7 @@
 /*
  * SPI bus driver for the Topcliff PCH used by Intel SoCs
  *
- * Copyright (C) 2010 OKI SEMICONDUCTOR Co., LTD.
+ * Copyright (C) 2011 LAPIS Semiconductor Co., Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -95,7 +95,7 @@
 #define PCH_CLOCK_HZ		50000000
 #define PCH_MAX_SPBR		1023
 
-/* Definition for ML7213/ML7831 by OKI SEMICONDUCTOR */
+/* Definition for ML7213/ML7223/ML7831 by LAPIS Semiconductor */
 #define PCI_VENDOR_ID_ROHM		0x10DB
 #define PCI_DEVICE_ID_ML7213_SPI	0x802c
 #define PCI_DEVICE_ID_ML7223_SPI	0x800F
@@ -104,9 +104,9 @@
 /*
  * Set the number of SPI instance max
  * Intel EG20T PCH :		1ch
- * OKI SEMICONDUCTOR ML7213 IOH :	2ch
- * OKI SEMICONDUCTOR ML7223 IOH :	1ch
- * OKI SEMICONDUCTOR ML7831 IOH :	1ch
+ * LAPIS Semiconductor ML7213 IOH :	2ch
+ * LAPIS Semiconductor ML7223 IOH :	1ch
+ * LAPIS Semiconductor ML7831 IOH :	1ch
 */
 #define PCH_SPI_MAX_DEV			2
 
@@ -217,7 +217,7 @@ struct pch_pd_dev_save {
 	struct pch_spi_board_data *board_dat;
 };
 
-static struct pci_device_id pch_spi_pcidev_id[] = {
+static const struct pci_device_id pch_spi_pcidev_id[] = {
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_GE_SPI),    1, },
 	{ PCI_VDEVICE(ROHM, PCI_DEVICE_ID_ML7213_SPI), 2, },
 	{ PCI_VDEVICE(ROHM, PCI_DEVICE_ID_ML7223_SPI), 1, },
@@ -367,7 +367,7 @@ static irqreturn_t pch_spi_handler(int irq, void *dev_id)
 
 	if (reg_spsr_val & SPSR_ORF_BIT) {
 		dev_err(&board_dat->pdev->dev, "%s Over run error\n", __func__);
-		if (data->current_msg->complete != 0) {
+		if (data->current_msg->complete) {
 			data->transfer_complete = true;
 			data->current_msg->status = -EIO;
 			data->current_msg->complete(data->current_msg->context);
@@ -466,17 +466,6 @@ static void pch_spi_reset(struct spi_master *master)
 
 static int pch_spi_setup(struct spi_device *pspi)
 {
-	/* check bits per word */
-	if (pspi->bits_per_word == 0) {
-		pspi->bits_per_word = 8;
-		dev_dbg(&pspi->dev, "%s 8 bits per word\n", __func__);
-	}
-
-	if ((pspi->bits_per_word != 8) && (pspi->bits_per_word != 16)) {
-		dev_err(&pspi->dev, "%s Invalid bits per word\n", __func__);
-		return -EINVAL;
-	}
-
 	/* Check baud rate setting */
 	/* if baud rate of chip is greater than
 	   max we can support,return error */
@@ -505,14 +494,14 @@ static int pch_spi_transfer(struct spi_device *pspi, struct spi_message *pmsg)
 	}
 
 	if (unlikely(pspi->max_speed_hz == 0)) {
-		dev_err(&pspi->dev, "%s pch_spi_tranfer maxspeed=%d\n",
+		dev_err(&pspi->dev, "%s pch_spi_transfer maxspeed=%d\n",
 			__func__, pspi->max_speed_hz);
 		retval = -EINVAL;
 		goto err_out;
 	}
 
-	dev_dbg(&pspi->dev, "%s Transfer List not empty. "
-		"Transfer Speed is set.\n", __func__);
+	dev_dbg(&pspi->dev,
+		"%s Transfer List not empty. Transfer Speed is set.\n", __func__);
 
 	spin_lock_irqsave(&data->lock, flags);
 	/* validate Tx/Rx buffers and Transfer length */
@@ -531,23 +520,13 @@ static int pch_spi_transfer(struct spi_device *pspi, struct spi_message *pmsg)
 			goto err_return_spinlock;
 		}
 
-		dev_dbg(&pspi->dev, "%s Tx/Rx buffer valid. Transfer length"
-			" valid\n", __func__);
+		dev_dbg(&pspi->dev,
+			"%s Tx/Rx buffer valid. Transfer length valid\n",
+			__func__);
 
 		/* if baud rate has been specified validate the same */
 		if (transfer->speed_hz > PCH_MAX_BAUDRATE)
 			transfer->speed_hz = PCH_MAX_BAUDRATE;
-
-		/* if bits per word has been specified validate the same */
-		if (transfer->bits_per_word) {
-			if ((transfer->bits_per_word != 8)
-			    && (transfer->bits_per_word != 16)) {
-				retval = -EINVAL;
-				dev_err(&pspi->dev,
-					"%s Invalid bits per word\n", __func__);
-				goto err_return_spinlock;
-			}
-		}
 	}
 	spin_unlock_irqrestore(&data->lock, flags);
 
@@ -615,7 +594,7 @@ static void pch_spi_set_tx(struct pch_spi_data *data, int *bpw)
 	int size;
 	u32 n_writes;
 	int j;
-	struct spi_message *pmsg;
+	struct spi_message *pmsg, *tmp;
 	const u8 *tx_buf;
 	const u16 *tx_sbuf;
 
@@ -656,10 +635,10 @@ static void pch_spi_set_tx(struct pch_spi_data *data, int *bpw)
 	if (!data->pkt_rx_buff) {
 		/* flush queue and set status of all transfers to -ENOMEM */
 		dev_err(&data->master->dev, "%s :kzalloc failed\n", __func__);
-		list_for_each_entry(pmsg, data->queue.next, queue) {
+		list_for_each_entry_safe(pmsg, tmp, data->queue.next, queue) {
 			pmsg->status = -ENOMEM;
 
-			if (pmsg->complete != 0)
+			if (pmsg->complete)
 				pmsg->complete(pmsg->context);
 
 			/* delete from queue */
@@ -703,13 +682,13 @@ static void pch_spi_set_tx(struct pch_spi_data *data, int *bpw)
 
 static void pch_spi_nomore_transfer(struct pch_spi_data *data)
 {
-	struct spi_message *pmsg;
+	struct spi_message *pmsg, *tmp;
 	dev_dbg(&data->master->dev, "%s called\n", __func__);
 	/* Invoke complete callback
 	 * [To the spi core..indicating end of transfer] */
 	data->current_msg->status = 0;
 
-	if (data->current_msg->complete != 0) {
+	if (data->current_msg->complete) {
 		dev_dbg(&data->master->dev,
 			"%s:Invoking callback of SPI core\n", __func__);
 		data->current_msg->complete(data->current_msg->context);
@@ -740,7 +719,7 @@ static void pch_spi_nomore_transfer(struct pch_spi_data *data)
 		dev_dbg(&data->master->dev,
 			"%s suspend/remove initiated, flushing queue\n",
 			__func__);
-		list_for_each_entry(pmsg, data->queue.next, queue) {
+		list_for_each_entry_safe(pmsg, tmp, data->queue.next, queue) {
 			pmsg->status = -EIO;
 
 			if (pmsg->complete)
@@ -936,7 +915,7 @@ static void pch_spi_request_dma(struct pch_spi_data *data, int bpw)
 	/* Set Tx DMA */
 	param = &dma->param_tx;
 	param->dma_dev = &dma_dev->dev;
-	param->chan_id = data->master->bus_num * 2; /* Tx = 0, 2 */
+	param->chan_id = data->ch * 2; /* Tx = 0, 2 */;
 	param->tx_reg = data->io_base_addr + PCH_SPDWR;
 	param->width = width;
 	chan = dma_request_channel(mask, pch_spi_filter, param);
@@ -951,7 +930,7 @@ static void pch_spi_request_dma(struct pch_spi_data *data, int bpw)
 	/* Set Rx DMA */
 	param = &dma->param_rx;
 	param->dma_dev = &dma_dev->dev;
-	param->chan_id = data->master->bus_num * 2 + 1; /* Rx = Tx + 1 */
+	param->chan_id = data->ch * 2 + 1; /* Rx = Tx + 1 */;
 	param->rx_reg = data->io_base_addr + PCH_SPDRR;
 	param->width = width;
 	chan = dma_request_channel(mask, pch_spi_filter, param);
@@ -1099,8 +1078,8 @@ static void pch_spi_handle_dma(struct pch_spi_data *data, int *bpw)
 		sg_dma_address(sg) = dma->rx_buf_dma + sg->offset;
 	}
 	sg = dma->sg_rx_p;
-	desc_rx = dma->chan_rx->device->device_prep_slave_sg(dma->chan_rx, sg,
-					num, DMA_FROM_DEVICE,
+	desc_rx = dmaengine_prep_slave_sg(dma->chan_rx, sg,
+					num, DMA_DEV_TO_MEM,
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!desc_rx) {
 		dev_err(&data->master->dev, "%s:device_prep_slave_sg Failed\n",
@@ -1158,8 +1137,8 @@ static void pch_spi_handle_dma(struct pch_spi_data *data, int *bpw)
 		sg_dma_address(sg) = dma->tx_buf_dma + sg->offset;
 	}
 	sg = dma->sg_tx_p;
-	desc_tx = dma->chan_tx->device->device_prep_slave_sg(dma->chan_tx,
-					sg, num, DMA_TO_DEVICE,
+	desc_tx = dmaengine_prep_slave_sg(dma->chan_tx,
+					sg, num, DMA_MEM_TO_DEV,
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!desc_tx) {
 		dev_err(&data->master->dev, "%s:device_prep_slave_sg Failed\n",
@@ -1187,7 +1166,7 @@ static void pch_spi_handle_dma(struct pch_spi_data *data, int *bpw)
 
 static void pch_spi_process_messages(struct work_struct *pwork)
 {
-	struct spi_message *pmsg;
+	struct spi_message *pmsg, *tmp;
 	struct pch_spi_data *data;
 	int bpw;
 
@@ -1197,12 +1176,12 @@ static void pch_spi_process_messages(struct work_struct *pwork)
 	spin_lock(&data->lock);
 	/* check if suspend has been initiated;if yes flush queue */
 	if (data->board_dat->suspend_sts || (data->status == STATUS_EXITING)) {
-		dev_dbg(&data->master->dev, "%s suspend/remove initiated,"
-			"flushing queue\n", __func__);
-		list_for_each_entry(pmsg, data->queue.next, queue) {
+		dev_dbg(&data->master->dev,
+			"%s suspend/remove initiated, flushing queue\n", __func__);
+		list_for_each_entry_safe(pmsg, tmp, data->queue.next, queue) {
 			pmsg->status = -EIO;
 
-			if (pmsg->complete != 0) {
+			if (pmsg->complete) {
 				spin_unlock(&data->lock);
 				pmsg->complete(pmsg->context);
 				spin_lock(&data->lock);
@@ -1401,7 +1380,7 @@ static void pch_alloc_dma_buf(struct pch_spi_board_data *board_dat,
 				PCH_BUF_SIZE, &dma->rx_buf_dma, GFP_KERNEL);
 }
 
-static int __devinit pch_spi_pd_probe(struct platform_device *plat_dev)
+static int pch_spi_pd_probe(struct platform_device *plat_dev)
 {
 	int ret;
 	struct spi_master *master;
@@ -1426,23 +1405,23 @@ static int __devinit pch_spi_pd_probe(struct platform_device *plat_dev)
 	/* baseaddress + address offset) */
 	data->io_base_addr = pci_resource_start(board_dat->pdev, 1) +
 					 PCH_ADDRESS_SIZE * plat_dev->id;
-	data->io_remap_addr = pci_iomap(board_dat->pdev, 1, 0) +
-					 PCH_ADDRESS_SIZE * plat_dev->id;
+	data->io_remap_addr = pci_iomap(board_dat->pdev, 1, 0);
 	if (!data->io_remap_addr) {
 		dev_err(&plat_dev->dev, "%s pci_iomap failed\n", __func__);
 		ret = -ENOMEM;
 		goto err_pci_iomap;
 	}
+	data->io_remap_addr += PCH_ADDRESS_SIZE * plat_dev->id;
 
 	dev_dbg(&plat_dev->dev, "[ch%d] remap_addr=%p\n",
 		plat_dev->id, data->io_remap_addr);
 
 	/* initialize members of SPI master */
-	master->bus_num = -1;
 	master->num_chipselect = PCH_MAX_CS;
 	master->setup = pch_spi_setup;
 	master->transfer = pch_spi_transfer;
 	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST;
+	master->bits_per_word_mask = SPI_BPW_MASK(8) | SPI_BPW_MASK(16);
 
 	data->board_dat = board_dat;
 	data->plat_dev = plat_dev;
@@ -1473,6 +1452,11 @@ static int __devinit pch_spi_pd_probe(struct platform_device *plat_dev)
 
 	pch_spi_set_master_mode(master);
 
+	if (use_dma) {
+		dev_info(&plat_dev->dev, "Use DMA for data transfers\n");
+		pch_alloc_dma_buf(board_dat, data);
+	}
+
 	ret = spi_register_master(master);
 	if (ret != 0) {
 		dev_err(&plat_dev->dev,
@@ -1480,15 +1464,11 @@ static int __devinit pch_spi_pd_probe(struct platform_device *plat_dev)
 		goto err_spi_register_master;
 	}
 
-	if (use_dma) {
-		dev_info(&plat_dev->dev, "Use DMA for data transfers\n");
-		pch_alloc_dma_buf(board_dat, data);
-	}
-
 	return 0;
 
 err_spi_register_master:
-	free_irq(board_dat->pdev->irq, board_dat);
+	pch_free_dma_buf(board_dat, data);
+	free_irq(board_dat->pdev->irq, data);
 err_request_irq:
 	pch_spi_free_resources(board_dat, data);
 err_spi_get_resources:
@@ -1499,7 +1479,7 @@ err_pci_iomap:
 	return ret;
 }
 
-static int __devexit pch_spi_pd_remove(struct platform_device *plat_dev)
+static int pch_spi_pd_remove(struct platform_device *plat_dev)
 {
 	struct pch_spi_board_data *board_dat = dev_get_platdata(&plat_dev->dev);
 	struct pch_spi_data *data = platform_get_drvdata(plat_dev);
@@ -1537,8 +1517,6 @@ static int __devexit pch_spi_pd_remove(struct platform_device *plat_dev)
 
 	pci_iounmap(board_dat->pdev, data->io_remap_addr);
 	spi_unregister_master(data->master);
-	spi_master_put(data->master);
-	platform_set_drvdata(plat_dev, NULL);
 
 	return 0;
 }
@@ -1622,12 +1600,12 @@ static struct platform_driver pch_spi_pd_driver = {
 		.owner = THIS_MODULE,
 	},
 	.probe = pch_spi_pd_probe,
-	.remove = __devexit_p(pch_spi_pd_remove),
+	.remove = pch_spi_pd_remove,
 	.suspend = pch_spi_pd_suspend,
 	.resume = pch_spi_pd_resume
 };
 
-static int __devinit pch_spi_probe(struct pci_dev *pdev,
+static int pch_spi_probe(struct pci_dev *pdev,
 				   const struct pci_device_id *id)
 {
 	struct pch_spi_board_data *board_dat;
@@ -1670,6 +1648,7 @@ static int __devinit pch_spi_probe(struct pci_dev *pdev,
 		pd_dev = platform_device_alloc("pch-spi", i);
 		if (!pd_dev) {
 			dev_err(&pdev->dev, "platform_device_alloc failed\n");
+			retval = -ENOMEM;
 			goto err_platform_device;
 		}
 		pd_dev_save->pd_save[i] = pd_dev;
@@ -1708,7 +1687,7 @@ err_no_mem:
 	return retval;
 }
 
-static void __devexit pch_spi_remove(struct pci_dev *pdev)
+static void pch_spi_remove(struct pci_dev *pdev)
 {
 	int i;
 	struct pch_pd_dev_save *pd_dev_save = pci_get_drvdata(pdev);
@@ -1792,8 +1771,10 @@ static int __init pch_spi_init(void)
 		return ret;
 
 	ret = pci_register_driver(&pch_spi_pcidev_driver);
-	if (ret)
+	if (ret) {
+		platform_driver_unregister(&pch_spi_pd_driver);
 		return ret;
+	}
 
 	return 0;
 }
@@ -1811,4 +1792,6 @@ MODULE_PARM_DESC(use_dma,
 		 "to use DMA for data transfers pass 1 else 0; default 1");
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Intel EG20T PCH/OKI SEMICONDUCTOR ML7xxx IOH SPI Driver");
+MODULE_DESCRIPTION("Intel EG20T PCH/LAPIS Semiconductor ML7xxx IOH SPI Driver");
+MODULE_DEVICE_TABLE(pci, pch_spi_pcidev_id);
+

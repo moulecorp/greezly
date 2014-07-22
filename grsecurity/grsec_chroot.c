@@ -5,7 +5,7 @@
 #include <linux/fs.h>
 #include <linux/mount.h>
 #include <linux/types.h>
-#include <linux/pid_namespace.h>
+#include "../fs/mount.h"
 #include <linux/grsecurity.h>
 #include <linux/grinternal.h>
 
@@ -13,11 +13,11 @@
 int gr_init_ran;
 #endif
 
-void gr_set_chroot_entries(struct task_struct *task, struct path *path)
+void gr_set_chroot_entries(struct task_struct *task, const struct path *path)
 {
 #ifdef CONFIG_GRKERNSEC
-	if (task->pid > 1 && path->dentry != init_task.fs->root.dentry &&
-	    		     path->dentry != task->nsproxy->mnt_ns->root->mnt_root
+	if (task_pid_nr(task) > 1 && path->dentry != init_task.fs->root.dentry &&
+	    		     path->dentry != task->nsproxy->mnt_ns->root->mnt.mnt_root
 #ifdef CONFIG_GRKERNSEC_CHROOT_INITRD
 			     && gr_init_ran
 #endif
@@ -25,7 +25,7 @@ void gr_set_chroot_entries(struct task_struct *task, struct path *path)
 		task->gr_is_chrooted = 1;
 	else {
 #ifdef CONFIG_GRKERNSEC_CHROOT_INITRD
-		if (task->pid == 1 && !gr_init_ran)
+		if (task_pid_nr(task) == 1 && !gr_init_ran)
 			gr_init_ran = 1;
 #endif
 		task->gr_is_chrooted = 0;
@@ -90,7 +90,7 @@ gr_handle_chroot_setpriority(struct task_struct *p, const int niceval)
 #ifdef CONFIG_GRKERNSEC_CHROOT_NICE
 	if (grsec_enable_chroot_nice && (niceval < task_nice(p))
 			&& proc_is_chrooted(current)) {
-		gr_log_str_int(GR_DONT_AUDIT, GR_PRIORITY_CHROOT_MSG, p->comm, p->pid);
+		gr_log_str_int(GR_DONT_AUDIT, GR_PRIORITY_CHROOT_MSG, p->comm, task_pid_nr(p));
 		return -EACCES;
 	}
 #endif
@@ -301,16 +301,38 @@ extern const char *captab_log[];
 extern int captab_log_entries;
 
 int
+gr_task_chroot_is_capable(const struct task_struct *task, const struct cred *cred, const int cap)
+{
+#ifdef CONFIG_GRKERNSEC_CHROOT_CAPS
+	if (grsec_enable_chroot_caps && proc_is_chrooted(task)) {
+		kernel_cap_t chroot_caps = GR_CHROOT_CAPS;
+		if (cap_raised(chroot_caps, cap)) {
+			if (cap_raised(cred->cap_effective, cap) && cap < captab_log_entries) {
+				gr_log_cap(GR_DONT_AUDIT, GR_CAP_CHROOT_MSG, task, captab_log[cap]);
+			}
+			return 0;
+		}
+	}
+#endif
+	return 1;
+}
+
+int
 gr_chroot_is_capable(const int cap)
 {
 #ifdef CONFIG_GRKERNSEC_CHROOT_CAPS
-	if (grsec_enable_chroot_caps && proc_is_chrooted(current)) {
+	return gr_task_chroot_is_capable(current, current_cred(), cap);
+#endif
+	return 1;
+}
+
+int
+gr_task_chroot_is_capable_nolog(const struct task_struct *task, const int cap)
+{
+#ifdef CONFIG_GRKERNSEC_CHROOT_CAPS
+	if (grsec_enable_chroot_caps && proc_is_chrooted(task)) {
 		kernel_cap_t chroot_caps = GR_CHROOT_CAPS;
 		if (cap_raised(chroot_caps, cap)) {
-			const struct cred *creds = current_cred();
-			if (cap_raised(creds->cap_effective, cap) && cap < captab_log_entries) {
-				gr_log_cap(GR_DONT_AUDIT, GR_CAP_CHROOT_MSG, current, captab_log[cap]);
-			}
 			return 0;
 		}
 	}
@@ -322,12 +344,7 @@ int
 gr_chroot_is_capable_nolog(const int cap)
 {
 #ifdef CONFIG_GRKERNSEC_CHROOT_CAPS
-	if (grsec_enable_chroot_caps && proc_is_chrooted(current)) {
-		kernel_cap_t chroot_caps = GR_CHROOT_CAPS;
-		if (cap_raised(chroot_caps, cap)) {
-			return 0;
-		}
-	}
+	return gr_task_chroot_is_capable_nolog(current, cap);
 #endif
 	return 1;
 }
@@ -344,7 +361,7 @@ gr_handle_chroot_sysctl(const int op)
 }
 
 void
-gr_handle_chroot_chdir(struct path *path)
+gr_handle_chroot_chdir(const struct path *path)
 {
 #ifdef CONFIG_GRKERNSEC_CHROOT_CHDIR
 	if (grsec_enable_chroot_chdir)

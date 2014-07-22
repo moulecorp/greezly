@@ -65,9 +65,7 @@
 #define ETHER_ADDR_STR_LEN	18
 
 struct pktq_prec {
-	struct sk_buff *head;	/* first packet to dequeue */
-	struct sk_buff *tail;	/* last packet to dequeue */
-	u16 len;		/* number of queued packets */
+	struct sk_buff_head skblist;
 	u16 max;		/* maximum number of queued packets */
 };
 
@@ -88,55 +86,57 @@ struct pktq {
 
 static inline int pktq_plen(struct pktq *pq, int prec)
 {
-	return pq->q[prec].len;
+	return pq->q[prec].skblist.qlen;
 }
 
 static inline int pktq_pavail(struct pktq *pq, int prec)
 {
-	return pq->q[prec].max - pq->q[prec].len;
+	return pq->q[prec].max - pq->q[prec].skblist.qlen;
 }
 
 static inline bool pktq_pfull(struct pktq *pq, int prec)
 {
-	return pq->q[prec].len >= pq->q[prec].max;
+	return pq->q[prec].skblist.qlen >= pq->q[prec].max;
 }
 
 static inline bool pktq_pempty(struct pktq *pq, int prec)
 {
-	return pq->q[prec].len == 0;
+	return skb_queue_empty(&pq->q[prec].skblist);
 }
 
 static inline struct sk_buff *pktq_ppeek(struct pktq *pq, int prec)
 {
-	return pq->q[prec].head;
+	return skb_peek(&pq->q[prec].skblist);
 }
 
 static inline struct sk_buff *pktq_ppeek_tail(struct pktq *pq, int prec)
 {
-	return pq->q[prec].tail;
+	return skb_peek_tail(&pq->q[prec].skblist);
 }
 
-extern struct sk_buff *brcmu_pktq_penq(struct pktq *pq, int prec,
-				 struct sk_buff *p);
-extern struct sk_buff *brcmu_pktq_penq_head(struct pktq *pq, int prec,
-				      struct sk_buff *p);
-extern struct sk_buff *brcmu_pktq_pdeq(struct pktq *pq, int prec);
-extern struct sk_buff *brcmu_pktq_pdeq_tail(struct pktq *pq, int prec);
+struct sk_buff *brcmu_pktq_penq(struct pktq *pq, int prec, struct sk_buff *p);
+struct sk_buff *brcmu_pktq_penq_head(struct pktq *pq, int prec,
+				     struct sk_buff *p);
+struct sk_buff *brcmu_pktq_pdeq(struct pktq *pq, int prec);
+struct sk_buff *brcmu_pktq_pdeq_tail(struct pktq *pq, int prec);
+struct sk_buff *brcmu_pktq_pdeq_match(struct pktq *pq, int prec,
+				      bool (*match_fn)(struct sk_buff *p,
+						       void *arg),
+				      void *arg);
 
 /* packet primitives */
-extern struct sk_buff *brcmu_pkt_buf_get_skb(uint len);
-extern void brcmu_pkt_buf_free_skb(struct sk_buff *skb);
+struct sk_buff *brcmu_pkt_buf_get_skb(uint len);
+void brcmu_pkt_buf_free_skb(struct sk_buff *skb);
 
 /* Empty the queue at particular precedence level */
 /* callback function fn(pkt, arg) returns true if pkt belongs to if */
-extern void brcmu_pktq_pflush(struct pktq *pq, int prec,
-	bool dir, bool (*fn)(struct sk_buff *, void *), void *arg);
+void brcmu_pktq_pflush(struct pktq *pq, int prec, bool dir,
+		       bool (*fn)(struct sk_buff *, void *), void *arg);
 
 /* operations on a set of precedences in packet queue */
 
-extern int brcmu_pktq_mlen(struct pktq *pq, uint prec_bmp);
-extern struct sk_buff *brcmu_pktq_mdeq(struct pktq *pq, uint prec_bmp,
-	int *prec_out);
+int brcmu_pktq_mlen(struct pktq *pq, uint prec_bmp);
+struct sk_buff *brcmu_pktq_mdeq(struct pktq *pq, uint prec_bmp, int *prec_out);
 
 /* operations on packet queue as a whole */
 
@@ -165,31 +165,57 @@ static inline bool pktq_empty(struct pktq *pq)
 	return pq->len == 0;
 }
 
-extern void brcmu_pktq_init(struct pktq *pq, int num_prec, int max_len);
+void brcmu_pktq_init(struct pktq *pq, int num_prec, int max_len);
 /* prec_out may be NULL if caller is not interested in return value */
-extern struct sk_buff *brcmu_pktq_peek_tail(struct pktq *pq, int *prec_out);
-extern void brcmu_pktq_flush(struct pktq *pq, bool dir,
-		bool (*fn)(struct sk_buff *, void *), void *arg);
+struct sk_buff *brcmu_pktq_peek_tail(struct pktq *pq, int *prec_out);
+void brcmu_pktq_flush(struct pktq *pq, bool dir,
+		      bool (*fn)(struct sk_buff *, void *), void *arg);
 
 /* externs */
-/* packet */
-extern uint brcmu_pktfrombuf(struct sk_buff *p,
-	uint offset, int len, unsigned char *buf);
-extern uint brcmu_pkttotlen(struct sk_buff *p);
-
 /* ip address */
 struct ipv4_addr;
 
-#ifdef BCMDBG
-extern void brcmu_prpkt(const char *msg, struct sk_buff *p0);
-#else
-#define brcmu_prpkt(a, b)
-#endif				/* BCMDBG */
+/*
+ * bitfield macros using masking and shift
+ *
+ * remark: the mask parameter should be a shifted mask.
+ */
+static inline void brcmu_maskset32(u32 *var, u32 mask, u8 shift, u32 value)
+{
+	value = (value << shift) & mask;
+	*var = (*var & ~mask) | value;
+}
+static inline u32 brcmu_maskget32(u32 var, u32 mask, u8 shift)
+{
+	return (var & mask) >> shift;
+}
+static inline void brcmu_maskset16(u16 *var, u16 mask, u8 shift, u16 value)
+{
+	value = (value << shift) & mask;
+	*var = (*var & ~mask) | value;
+}
+static inline u16 brcmu_maskget16(u16 var, u16 mask, u8 shift)
+{
+	return (var & mask) >> shift;
+}
 
 /* externs */
 /* format/print */
-#if defined(BCMDBG)
-extern int brcmu_format_hex(char *str, const void *bytes, int len);
+#ifdef DEBUG
+void brcmu_prpkt(const char *msg, struct sk_buff *p0);
+#else
+#define brcmu_prpkt(a, b)
+#endif				/* DEBUG */
+
+#ifdef DEBUG
+__printf(3, 4)
+void brcmu_dbg_hex_dump(const void *data, size_t size, const char *fmt, ...);
+#else
+__printf(3, 4)
+static inline
+void brcmu_dbg_hex_dump(const void *data, size_t size, const char *fmt, ...)
+{
+}
 #endif
 
 #endif				/* _BRCMU_UTILS_H_ */

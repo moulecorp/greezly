@@ -21,7 +21,6 @@
 
 #include <plat/cpu.h>
 #include <plat/pm.h>
-#include <plat/regs-timer.h>
 
 #include <mach/regs-irq.h>
 #include <mach/regs-clock.h>
@@ -77,15 +76,6 @@ static struct sleep_save s5pv210_core_save[] = {
 	/* Clock ETC */
 	SAVE_ITEM(S5P_CLK_OUT),
 	SAVE_ITEM(S5P_MDNIE_SEL),
-
-	/* PWM Register */
-	SAVE_ITEM(S3C2410_TCFG0),
-	SAVE_ITEM(S3C2410_TCFG1),
-	SAVE_ITEM(S3C64XX_TINT_CSTAT),
-	SAVE_ITEM(S3C2410_TCON),
-	SAVE_ITEM(S3C2410_TCNTB(0)),
-	SAVE_ITEM(S3C2410_TCMPB(0)),
-	SAVE_ITEM(S3C2410_TCNTO(0)),
 };
 
 static int s5pv210_cpu_suspend(unsigned long arg)
@@ -104,8 +94,8 @@ static int s5pv210_cpu_suspend(unsigned long arg)
 	    "mcr p15, 0, %0, c7, c10, 4\n\t"
 	    "wfi" : : "r" (tmp));
 
-	/* we should never get past here */
-	panic("sleep resumed to originator?");
+	pr_info("Failed to suspend the system\n");
+	return 1; /* Aborting suspend */
 }
 
 static void s5pv210_pm_prepare(void)
@@ -133,7 +123,7 @@ static void s5pv210_pm_prepare(void)
 	s3c_pm_do_save(s5pv210_core_save, ARRAY_SIZE(s5pv210_core_save));
 }
 
-static int s5pv210_pm_add(struct sys_device *sysdev)
+static int s5pv210_pm_add(struct device *dev, struct subsys_interface *sif)
 {
 	pm_cpu_prep = s5pv210_pm_prepare;
 	pm_cpu_sleep = s5pv210_cpu_suspend;
@@ -141,13 +131,15 @@ static int s5pv210_pm_add(struct sys_device *sysdev)
 	return 0;
 }
 
-static struct sysdev_driver s5pv210_pm_driver = {
-	.add		= s5pv210_pm_add,
+static struct subsys_interface s5pv210_pm_interface = {
+	.name		= "s5pv210_pm",
+	.subsys		= &s5pv210_subsys,
+	.add_dev	= s5pv210_pm_add,
 };
 
 static __init int s5pv210_pm_drvinit(void)
 {
-	return sysdev_driver_register(&s5pv210_sysclass, &s5pv210_pm_driver);
+	return subsys_interface_register(&s5pv210_pm_interface);
 }
 arch_initcall(s5pv210_pm_drvinit);
 

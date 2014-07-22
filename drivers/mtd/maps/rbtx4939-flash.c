@@ -34,10 +34,9 @@ static int rbtx4939_flash_remove(struct platform_device *dev)
 	info = platform_get_drvdata(dev);
 	if (!info)
 		return 0;
-	platform_set_drvdata(dev, NULL);
 
 	if (info->mtd) {
-		struct rbtx4939_flash_data *pdata = dev->dev.platform_data;
+		struct rbtx4939_flash_data *pdata = dev_get_platdata(&dev->dev);
 
 		mtd_device_unregister(info->mtd);
 		map_destroy(info->mtd);
@@ -45,18 +44,19 @@ static int rbtx4939_flash_remove(struct platform_device *dev)
 	return 0;
 }
 
-static const char *rom_probe_types[] = { "cfi_probe", "jedec_probe", NULL };
+static const char * const rom_probe_types[] = {
+	"cfi_probe", "jedec_probe", NULL };
 
 static int rbtx4939_flash_probe(struct platform_device *dev)
 {
 	struct rbtx4939_flash_data *pdata;
 	struct rbtx4939_flash_info *info;
 	struct resource *res;
-	const char **probe_type;
+	const char * const *probe_type;
 	int err = 0;
 	unsigned long size;
 
-	pdata = dev->dev.platform_data;
+	pdata = dev_get_platdata(&dev->dev);
 	if (!pdata)
 		return -ENODEV;
 
@@ -100,10 +100,8 @@ static int rbtx4939_flash_probe(struct platform_device *dev)
 		goto err_out;
 	}
 	info->mtd->owner = THIS_MODULE;
-	if (err)
-		goto err_out;
-	err = mtd_device_parse_register(info->mtd, NULL, 0,
-			pdata->parts, pdata->nr_parts);
+	err = mtd_device_parse_register(info->mtd, NULL, NULL, pdata->parts,
+					pdata->nr_parts);
 
 	if (err)
 		goto err_out;
@@ -119,9 +117,8 @@ static void rbtx4939_flash_shutdown(struct platform_device *dev)
 {
 	struct rbtx4939_flash_info *info = platform_get_drvdata(dev);
 
-	if (info->mtd->suspend && info->mtd->resume)
-		if (info->mtd->suspend(info->mtd) == 0)
-			info->mtd->resume(info->mtd);
+	if (mtd_suspend(info->mtd) == 0)
+		mtd_resume(info->mtd);
 }
 #else
 #define rbtx4939_flash_shutdown NULL
@@ -137,18 +134,7 @@ static struct platform_driver rbtx4939_flash_driver = {
 	},
 };
 
-static int __init rbtx4939_flash_init(void)
-{
-	return platform_driver_register(&rbtx4939_flash_driver);
-}
-
-static void __exit rbtx4939_flash_exit(void)
-{
-	platform_driver_unregister(&rbtx4939_flash_driver);
-}
-
-module_init(rbtx4939_flash_init);
-module_exit(rbtx4939_flash_exit);
+module_platform_driver(rbtx4939_flash_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("RBTX4939 MTD map driver");

@@ -23,6 +23,8 @@
 #include <linux/stop_machine.h>
 #include <linux/fdtable.h>
 #include <linux/percpu.h>
+#include <linux/lglock.h>
+#include <linux/hugetlb.h>
 #include <linux/posix-timers.h>
 #include <linux/prefetch.h>
 #if defined(CONFIG_BTRFS_FS) || defined(CONFIG_BTRFS_FS_MODULE)
@@ -32,6 +34,7 @@
 #include "../fs/btrfs/ctree.h"
 #include "../fs/btrfs/btrfs_inode.h"
 #endif
+#include "../fs/mount.h"
 
 #include <asm/uaccess.h>
 #include <asm/errno.h>
@@ -52,15 +55,9 @@ struct gr_policy_state *polstate = &running_polstate;
 extern struct gr_alloc_state *current_alloc_state;
 
 extern char *gr_shared_page[4];
-static DEFINE_MUTEX(gr_dev_mutex);
 DEFINE_RWLOCK(gr_inode_lock);
 
 static unsigned int gr_status __read_only = GR_STATUS_INIT;
-
-#ifdef CONFIG_GRKERNSEC_RESLOG
-extern void gr_log_resource(const struct task_struct *task,
-			    const int res, const unsigned long wanted, const int gt);
-#endif
 
 #ifdef CONFIG_NET
 extern struct vfsmount *sock_mnt;
@@ -68,11 +65,10 @@ extern struct vfsmount *sock_mnt;
 
 extern struct vfsmount *pipe_mnt;
 extern struct vfsmount *shm_mnt;
-#ifdef CONFIG_HUGETLBFS
-extern struct vfsmount *hugetlbfs_vfsmount;
-#endif
 
-DECLARE_BRLOCK(vfsmount_lock);
+#ifdef CONFIG_HUGETLBFS
+extern struct vfsmount *hugetlbfs_vfsmount[HUGE_MAX_HSTATE];
+#endif
 
 extern u16 acl_sp_role_value;
 extern struct acl_object_label *fakefs_obj_rw;
@@ -92,11 +88,11 @@ void gr_enable_rbac_system(void)
 
 int gr_rbac_disable(void *unused)
 {
-	pax_open_kernel();
-	gr_status &= ~GR_READY;
-	pax_close_kernel();
+        pax_open_kernel();
+        gr_status &= ~GR_READY;
+        pax_close_kernel();
 
-	return 0;
+        return 0;
 }
 
 static inline dev_t __get_dev(const struct dentry *dentry)
@@ -189,6 +185,7 @@ static int prepend_path(const struct path *path, struct path *root,
 {
 	struct dentry *dentry = path->dentry;
 	struct vfsmount *vfsmnt = path->mnt;
+	struct mount *mnt = real_mount(vfsmnt);
 	bool slash = false;
 	int error = 0;
 
@@ -197,11 +194,12 @@ static int prepend_path(const struct path *path, struct path *root,
 
 		if (dentry == vfsmnt->mnt_root || IS_ROOT(dentry)) {
 			/* Global root? */
-			if (vfsmnt->mnt_parent == vfsmnt) {
+			if (!mnt_has_parent(mnt)) {
 				goto out;
 			}
-			dentry = vfsmnt->mnt_mountpoint;
-			vfsmnt = vfsmnt->mnt_parent;
+			dentry = mnt->mnt_mountpoint;
+			mnt = mnt->mnt_parent;
+			vfsmnt = &mnt->mnt;
 			continue;
 		}
 		parent = dentry->d_parent;
@@ -225,7 +223,7 @@ out:
 	return error;
 }
 
-/* this must be called with vfsmount_lock and rename_lock held */
+/* this must be called with mount_lock and rename_lock held */
 
 static char *__our_d_path(const struct path *path, struct path *root,
 			char *buf, int buflen)
@@ -279,7 +277,7 @@ d_real_path(const struct dentry *dentry, const struct vfsmount *vfsmnt,
 	char *res;
 	struct path path;
 	struct path root;
-	struct task_struct *reaper = &init_task;
+	struct task_struct *reaper = init_pid_ns.child_reaper;
 
 	path.dentry = (struct dentry *)dentry;
 	path.mnt = (struct vfsmount *)vfsmnt;
@@ -287,11 +285,11 @@ d_real_path(const struct dentry *dentry, const struct vfsmount *vfsmnt,
 	/* we can't use gr_real_root.dentry, gr_real_root.mnt, because they belong only to the RBAC system */
 	get_fs_root(reaper->fs, &root);
 
-	br_read_lock(vfsmount_lock);
+	read_seqlock_excl(&mount_lock);
 	write_seqlock(&rename_lock);
 	res = gen_full_path(&path, &root, buf, buflen);
 	write_sequnlock(&rename_lock);
-	br_read_unlock(vfsmount_lock);
+	read_sequnlock_excl(&mount_lock);
 
 	path_put(&root);
 	return res;
@@ -301,12 +299,12 @@ char *
 gr_to_filename_rbac(const struct dentry *dentry, const struct vfsmount *mnt)
 {
 	char *ret;
-	br_read_lock(vfsmount_lock);
+	read_seqlock_excl(&mount_lock);
 	write_seqlock(&rename_lock);
 	ret = __d_real_path(dentry, mnt, per_cpu_ptr(gr_shared_page[0],smp_processor_id()),
 			     PAGE_SIZE);
 	write_sequnlock(&rename_lock);
-	br_read_unlock(vfsmount_lock);
+	read_sequnlock_excl(&mount_lock);
 	return ret;
 }
 
@@ -317,7 +315,7 @@ gr_to_proc_filename_rbac(const struct dentry *dentry, const struct vfsmount *mnt
 	char *buf;
 	int buflen;
 
-	br_read_lock(vfsmount_lock);
+	read_seqlock_excl(&mount_lock);
 	write_seqlock(&rename_lock);
 	buf = per_cpu_ptr(gr_shared_page[0], smp_processor_id());
 	ret = __d_real_path(dentry, mnt, buf, PAGE_SIZE - 6);
@@ -327,7 +325,7 @@ gr_to_proc_filename_rbac(const struct dentry *dentry, const struct vfsmount *mnt
 	else
 		ret = strcpy(buf, "<path too long>");
 	write_sequnlock(&rename_lock);
-	br_read_unlock(vfsmount_lock);
+	read_sequnlock_excl(&mount_lock);
 	return ret;
 }
 
@@ -866,16 +864,31 @@ full_lookup(const struct dentry *orig_dentry, const struct vfsmount *orig_mnt,
 	return __full_lookup(orig_dentry, orig_mnt, inode, device, subj, path, newglob);
 }
 
+#ifdef CONFIG_HUGETLBFS
+static inline bool
+is_hugetlbfs_mnt(const struct vfsmount *mnt)
+{
+	int i;
+	for (i = 0; i < HUGE_MAX_HSTATE; i++) {
+		if (unlikely(hugetlbfs_vfsmount[i] == mnt))
+			return true;
+	}
+
+	return false;
+}
+#endif
+
 static struct acl_object_label *
 __chk_obj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 	      const struct acl_subject_label *subj, char *path, const int checkglob)
 {
 	struct dentry *dentry = (struct dentry *) l_dentry;
 	struct vfsmount *mnt = (struct vfsmount *) l_mnt;
+	struct mount *real_mnt = real_mount(mnt);
 	struct acl_object_label *retval;
 	struct dentry *parent;
 
-	br_read_lock(vfsmount_lock);
+	read_seqlock_excl(&mount_lock);
 	write_seqlock(&rename_lock);
 
 	if (unlikely((mnt == shm_mnt && dentry->d_inode->i_nlink == 0) || mnt == pipe_mnt ||
@@ -883,7 +896,7 @@ __chk_obj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 	    mnt == sock_mnt ||
 #endif
 #ifdef CONFIG_HUGETLBFS
-	    (mnt == hugetlbfs_vfsmount && dentry->d_inode->i_nlink == 0) ||
+	    (is_hugetlbfs_mnt(mnt) && dentry->d_inode->i_nlink == 0) ||
 #endif
 		/* ignore Eric Biederman */
 	    IS_PRIVATE(l_dentry->d_inode))) {
@@ -896,15 +909,16 @@ __chk_obj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 			break;
 
 		if (dentry == mnt->mnt_root || IS_ROOT(dentry)) {
-			if (mnt->mnt_parent == mnt)
+			if (!mnt_has_parent(real_mnt))
 				break;
 
 			retval = full_lookup(l_dentry, l_mnt, dentry, subj, &path, checkglob);
 			if (retval != NULL)
 				goto out;
 
-			dentry = mnt->mnt_mountpoint;
-			mnt = mnt->mnt_parent;
+			dentry = real_mnt->mnt_mountpoint;
+			real_mnt = real_mnt->mnt_parent;
+			mnt = &real_mnt->mnt;
 			continue;
 		}
 
@@ -923,7 +937,7 @@ __chk_obj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 		retval = full_lookup(l_dentry, l_mnt, gr_real_root.dentry, subj, &path, checkglob);
 out:
 	write_sequnlock(&rename_lock);
-	br_read_unlock(vfsmount_lock);
+	read_sequnlock_excl(&mount_lock);
 
 	BUG_ON(retval == NULL);
 
@@ -959,17 +973,18 @@ chk_subj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 {
 	struct dentry *dentry = (struct dentry *) l_dentry;
 	struct vfsmount *mnt = (struct vfsmount *) l_mnt;
+	struct mount *real_mnt = real_mount(mnt);
 	struct acl_subject_label *retval;
 	struct dentry *parent;
 
-	br_read_lock(vfsmount_lock);
+	read_seqlock_excl(&mount_lock);
 	write_seqlock(&rename_lock);
 
 	for (;;) {
 		if (dentry == gr_real_root.dentry && mnt == gr_real_root.mnt)
 			break;
 		if (dentry == mnt->mnt_root || IS_ROOT(dentry)) {
-			if (mnt->mnt_parent == mnt)
+			if (!mnt_has_parent(real_mnt))
 				break;
 
 			spin_lock(&dentry->d_lock);
@@ -982,8 +997,9 @@ chk_subj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 			if (retval != NULL)
 				goto out;
 
-			dentry = mnt->mnt_mountpoint;
-			mnt = mnt->mnt_parent;
+			dentry = real_mnt->mnt_mountpoint;
+			real_mnt = real_mnt->mnt_parent;
+			mnt = &real_mnt->mnt;
 			continue;
 		}
 
@@ -1017,7 +1033,7 @@ chk_subj_label(const struct dentry *l_dentry, const struct vfsmount *l_mnt,
 	}
 out:
 	write_sequnlock(&rename_lock);
-	br_read_unlock(vfsmount_lock);
+	read_sequnlock_excl(&mount_lock);
 
 	BUG_ON(retval == NULL);
 
@@ -1091,7 +1107,7 @@ gr_log_learn(const struct dentry *dentry, const struct vfsmount *mnt, const __u3
 	const struct cred *cred = current_cred();
 
 	security_learn(GR_LEARN_AUDIT_MSG, task->role->rolename, task->role->roletype,
-		       cred->uid, cred->gid, task->exec_file ? gr_to_filename1(task->exec_file->f_path.dentry,
+		       GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid), task->exec_file ? gr_to_filename1(task->exec_file->f_path.dentry,
 		       task->exec_file->f_path.mnt) : task->acl->filename, task->acl->filename,
 		       1UL, 1UL, gr_to_filename(dentry, mnt), (unsigned long) mode, &task->signal->saved_ip);
 
@@ -1099,30 +1115,29 @@ gr_log_learn(const struct dentry *dentry, const struct vfsmount *mnt, const __u3
 }
 
 static void
-gr_log_learn_sysctl(const char *path, const __u32 mode)
-{
-	struct task_struct *task = current;
-	const struct cred *cred = current_cred();
-
-	security_learn(GR_LEARN_AUDIT_MSG, task->role->rolename, task->role->roletype,
-		       cred->uid, cred->gid, task->exec_file ? gr_to_filename1(task->exec_file->f_path.dentry,
-		       task->exec_file->f_path.mnt) : task->acl->filename, task->acl->filename,
-		       1UL, 1UL, path, (unsigned long) mode, &task->signal->saved_ip);
-
-	return;
-}
-
-static void
-gr_log_learn_id_change(const char type, const unsigned int real, 
-		       const unsigned int effective, const unsigned int fs)
+gr_log_learn_uid_change(const kuid_t real, const kuid_t effective, const kuid_t fs)
 {
 	struct task_struct *task = current;
 	const struct cred *cred = current_cred();
 
 	security_learn(GR_ID_LEARN_MSG, task->role->rolename, task->role->roletype,
-		       cred->uid, cred->gid, task->exec_file ? gr_to_filename1(task->exec_file->f_path.dentry,
+		       GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid), task->exec_file ? gr_to_filename1(task->exec_file->f_path.dentry,
 		       task->exec_file->f_path.mnt) : task->acl->filename, task->acl->filename,
-		       type, real, effective, fs, &task->signal->saved_ip);
+		       'u', GR_GLOBAL_UID(real), GR_GLOBAL_UID(effective), GR_GLOBAL_UID(fs), &task->signal->saved_ip);
+
+	return;
+}
+
+static void
+gr_log_learn_gid_change(const kgid_t real, const kgid_t effective, const kgid_t fs)
+{
+	struct task_struct *task = current;
+	const struct cred *cred = current_cred();
+
+	security_learn(GR_ID_LEARN_MSG, task->role->rolename, task->role->roletype,
+		       GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid), task->exec_file ? gr_to_filename1(task->exec_file->f_path.dentry,
+		       task->exec_file->f_path.mnt) : task->acl->filename, task->acl->filename,
+		       'g', GR_GLOBAL_GID(real), GR_GLOBAL_GID(effective), GR_GLOBAL_GID(fs), &task->signal->saved_ip);
 
 	return;
 }
@@ -1493,23 +1508,28 @@ gr_copy_label(struct task_struct *tsk)
 extern int gr_process_kernel_setuid_ban(struct user_struct *user);
 
 int
-gr_check_user_change(int real, int effective, int fs)
+gr_check_user_change(kuid_t real, kuid_t effective, kuid_t fs)
 {
 	unsigned int i;
 	__u16 num;
 	uid_t *uidlist;
-	int curuid;
+	uid_t curuid;
 	int realok = 0;
 	int effectiveok = 0;
 	int fsok = 0;
+	uid_t globalreal, globaleffective, globalfs;
 
 #if defined(CONFIG_GRKERNSEC_KERN_LOCKOUT)
 	struct user_struct *user;
 
-	if (real == -1)
+	if (!uid_valid(real))
 		goto skipit;
 
-	user = find_user(real);
+	/* find user based on global namespace */
+
+	globalreal = GR_GLOBAL_UID(real);
+
+	user = find_user(make_kuid(&init_user_ns, globalreal));
 	if (user == NULL)
 		goto skipit;
 
@@ -1529,7 +1549,7 @@ skipit:
 		return 0;
 
 	if (current->acl->mode & (GR_LEARN | GR_INHERITLEARN))
-		gr_log_learn_id_change('u', real, effective, fs);
+		gr_log_learn_uid_change(real, effective, fs);
 
 	num = current->acl->user_trans_num;
 	uidlist = current->acl->user_transitions;
@@ -1537,31 +1557,43 @@ skipit:
 	if (uidlist == NULL)
 		return 0;
 
-	if (real == -1)
+	if (!uid_valid(real)) {
 		realok = 1;
-	if (effective == -1)
+		globalreal = (uid_t)-1;		
+	} else {
+		globalreal = GR_GLOBAL_UID(real);		
+	}
+	if (!uid_valid(effective)) {
 		effectiveok = 1;
-	if (fs == -1)
+		globaleffective = (uid_t)-1;
+	} else {
+		globaleffective = GR_GLOBAL_UID(effective);
+	}
+	if (!uid_valid(fs)) {
 		fsok = 1;
+		globalfs = (uid_t)-1;
+	} else {
+		globalfs = GR_GLOBAL_UID(fs);
+	}
 
 	if (current->acl->user_trans_type & GR_ID_ALLOW) {
 		for (i = 0; i < num; i++) {
-			curuid = (int)uidlist[i];
-			if (real == curuid)
+			curuid = uidlist[i];
+			if (globalreal == curuid)
 				realok = 1;
-			if (effective == curuid)
+			if (globaleffective == curuid)
 				effectiveok = 1;
-			if (fs == curuid)
+			if (globalfs == curuid)
 				fsok = 1;
 		}
 	} else if (current->acl->user_trans_type & GR_ID_DENY) {
 		for (i = 0; i < num; i++) {
-			curuid = (int)uidlist[i];
-			if (real == curuid)
+			curuid = uidlist[i];
+			if (globalreal == curuid)
 				break;
-			if (effective == curuid)
+			if (globaleffective == curuid)
 				break;
-			if (fs == curuid)
+			if (globalfs == curuid)
 				break;
 		}
 		/* not in deny list */
@@ -1575,27 +1607,28 @@ skipit:
 	if (realok && effectiveok && fsok)
 		return 0;
 	else {
-		gr_log_int(GR_DONT_AUDIT, GR_USRCHANGE_ACL_MSG, realok ? (effectiveok ? (fsok ? 0 : fs) : effective) : real);
+		gr_log_int(GR_DONT_AUDIT, GR_USRCHANGE_ACL_MSG, realok ? (effectiveok ? (fsok ? 0 : globalfs) : globaleffective) : globalreal);
 		return 1;
 	}
 }
 
 int
-gr_check_group_change(int real, int effective, int fs)
+gr_check_group_change(kgid_t real, kgid_t effective, kgid_t fs)
 {
 	unsigned int i;
 	__u16 num;
 	gid_t *gidlist;
-	int curgid;
+	gid_t curgid;
 	int realok = 0;
 	int effectiveok = 0;
 	int fsok = 0;
+	gid_t globalreal, globaleffective, globalfs;
 
 	if (unlikely(!(gr_status & GR_READY)))
 		return 0;
 
 	if (current->acl->mode & (GR_LEARN | GR_INHERITLEARN))
-		gr_log_learn_id_change('g', real, effective, fs);
+		gr_log_learn_gid_change(real, effective, fs);
 
 	num = current->acl->group_trans_num;
 	gidlist = current->acl->group_transitions;
@@ -1603,31 +1636,43 @@ gr_check_group_change(int real, int effective, int fs)
 	if (gidlist == NULL)
 		return 0;
 
-	if (real == -1)
+	if (!gid_valid(real)) {
 		realok = 1;
-	if (effective == -1)
+		globalreal = (gid_t)-1;		
+	} else {
+		globalreal = GR_GLOBAL_GID(real);
+	}
+	if (!gid_valid(effective)) {
 		effectiveok = 1;
-	if (fs == -1)
+		globaleffective = (gid_t)-1;		
+	} else {
+		globaleffective = GR_GLOBAL_GID(effective);
+	}
+	if (!gid_valid(fs)) {
 		fsok = 1;
+		globalfs = (gid_t)-1;		
+	} else {
+		globalfs = GR_GLOBAL_GID(fs);
+	}
 
 	if (current->acl->group_trans_type & GR_ID_ALLOW) {
 		for (i = 0; i < num; i++) {
-			curgid = (int)gidlist[i];
-			if (real == curgid)
+			curgid = gidlist[i];
+			if (globalreal == curgid)
 				realok = 1;
-			if (effective == curgid)
+			if (globaleffective == curgid)
 				effectiveok = 1;
-			if (fs == curgid)
+			if (globalfs == curgid)
 				fsok = 1;
 		}
 	} else if (current->acl->group_trans_type & GR_ID_DENY) {
 		for (i = 0; i < num; i++) {
-			curgid = (int)gidlist[i];
-			if (real == curgid)
+			curgid = gidlist[i];
+			if (globalreal == curgid)
 				break;
-			if (effective == curgid)
+			if (globaleffective == curgid)
 				break;
-			if (fs == curgid)
+			if (globalfs == curgid)
 				break;
 		}
 		/* not in deny list */
@@ -1641,7 +1686,7 @@ gr_check_group_change(int real, int effective, int fs)
 	if (realok && effectiveok && fsok)
 		return 0;
 	else {
-		gr_log_int(GR_DONT_AUDIT, GR_GRPCHANGE_ACL_MSG, realok ? (effectiveok ? (fsok ? 0 : fs) : effective) : real);
+		gr_log_int(GR_DONT_AUDIT, GR_GRPCHANGE_ACL_MSG, realok ? (effectiveok ? (fsok ? 0 : globalfs) : globaleffective) : globalreal);
 		return 1;
 	}
 }
@@ -1649,15 +1694,20 @@ gr_check_group_change(int real, int effective, int fs)
 extern int gr_acl_is_capable(const int cap);
 
 void
-gr_set_role_label(struct task_struct *task, const uid_t uid, const uid_t gid)
+gr_set_role_label(struct task_struct *task, const kuid_t kuid, const kgid_t kgid)
 {
 	struct acl_role_label *role = task->role;
 	struct acl_subject_label *subj = NULL;
 	struct acl_object_label *obj;
 	struct file *filp;
+	uid_t uid;
+	gid_t gid;
 
 	if (unlikely(!(gr_status & GR_READY)))
 		return;
+
+	uid = GR_GLOBAL_UID(kuid);
+	gid = GR_GLOBAL_GID(kgid);
 
 	filp = task->exec_file;
 
@@ -1710,7 +1760,7 @@ gr_set_role_label(struct task_struct *task, const uid_t uid, const uid_t gid)
 		task->is_writable = 1;
 
 #ifdef CONFIG_GRKERNSEC_RBAC_DEBUG
-	printk(KERN_ALERT "Set role label for (%s:%d): role:%s, subject:%s\n", task->comm, task->pid, task->role->rolename, task->acl->filename);
+	printk(KERN_ALERT "Set role label for (%s:%d): role:%s, subject:%s\n", task->comm, task_pid_nr(task), task->role->rolename, task->acl->filename);
 #endif
 
 	gr_set_proc_res(task);
@@ -1789,7 +1839,7 @@ skip_check:
 	gr_set_proc_res(task);
 
 #ifdef CONFIG_GRKERNSEC_RBAC_DEBUG
-	printk(KERN_ALERT "Set subject label for (%s:%d): role:%s, subject:%s\n", task->comm, task->pid, task->role->rolename, task->acl->filename);
+	printk(KERN_ALERT "Set subject label for (%s:%d): role:%s, subject:%s\n", task->comm, task_pid_nr(task), task->role->rolename, task->acl->filename);
 #endif
 	return 0;
 }
@@ -2092,6 +2142,26 @@ gr_handle_rename(struct inode *old_dir, struct inode *new_dir,
 	return;
 }
 
+#if defined(CONFIG_GRKERNSEC_RESLOG) || !defined(CONFIG_GRKERNSEC_NO_RBAC)
+static const unsigned long res_learn_bumps[GR_NLIMITS] = {
+	[RLIMIT_CPU] = GR_RLIM_CPU_BUMP,
+	[RLIMIT_FSIZE] = GR_RLIM_FSIZE_BUMP,
+	[RLIMIT_DATA] = GR_RLIM_DATA_BUMP,
+	[RLIMIT_STACK] = GR_RLIM_STACK_BUMP,
+	[RLIMIT_CORE] = GR_RLIM_CORE_BUMP,
+	[RLIMIT_RSS] = GR_RLIM_RSS_BUMP,
+	[RLIMIT_NPROC] = GR_RLIM_NPROC_BUMP,
+	[RLIMIT_NOFILE] = GR_RLIM_NOFILE_BUMP,
+	[RLIMIT_MEMLOCK] = GR_RLIM_MEMLOCK_BUMP,
+	[RLIMIT_AS] = GR_RLIM_AS_BUMP,
+	[RLIMIT_LOCKS] = GR_RLIM_LOCKS_BUMP,
+	[RLIMIT_SIGPENDING] = GR_RLIM_SIGPENDING_BUMP,
+	[RLIMIT_MSGQUEUE] = GR_RLIM_MSGQUEUE_BUMP,
+	[RLIMIT_NICE] = GR_RLIM_NICE_BUMP,
+	[RLIMIT_RTPRIO] = GR_RLIM_RTPRIO_BUMP,
+	[RLIMIT_RTTIME] = GR_RLIM_RTTIME_BUMP
+};
+
 void
 gr_learn_resource(const struct task_struct *task,
 		  const int res, const unsigned long wanted, const int gt)
@@ -2103,10 +2173,8 @@ gr_learn_resource(const struct task_struct *task,
 		     task->acl && (task->acl->mode & (GR_LEARN | GR_INHERITLEARN))))
 		goto skip_reslog;
 
-#ifdef CONFIG_GRKERNSEC_RESLOG
 	gr_log_resource(task, res, wanted, gt);
-#endif
-      skip_reslog:
+skip_reslog:
 
 	if (unlikely(!(gr_status & GR_READY) || !wanted || res >= GR_NLIMITS))
 		return;
@@ -2120,57 +2188,7 @@ gr_learn_resource(const struct task_struct *task,
 	if (wanted >= acl->res[res].rlim_cur) {
 		unsigned long res_add;
 
-		res_add = wanted;
-		switch (res) {
-		case RLIMIT_CPU:
-			res_add += GR_RLIM_CPU_BUMP;
-			break;
-		case RLIMIT_FSIZE:
-			res_add += GR_RLIM_FSIZE_BUMP;
-			break;
-		case RLIMIT_DATA:
-			res_add += GR_RLIM_DATA_BUMP;
-			break;
-		case RLIMIT_STACK:
-			res_add += GR_RLIM_STACK_BUMP;
-			break;
-		case RLIMIT_CORE:
-			res_add += GR_RLIM_CORE_BUMP;
-			break;
-		case RLIMIT_RSS:
-			res_add += GR_RLIM_RSS_BUMP;
-			break;
-		case RLIMIT_NPROC:
-			res_add += GR_RLIM_NPROC_BUMP;
-			break;
-		case RLIMIT_NOFILE:
-			res_add += GR_RLIM_NOFILE_BUMP;
-			break;
-		case RLIMIT_MEMLOCK:
-			res_add += GR_RLIM_MEMLOCK_BUMP;
-			break;
-		case RLIMIT_AS:
-			res_add += GR_RLIM_AS_BUMP;
-			break;
-		case RLIMIT_LOCKS:
-			res_add += GR_RLIM_LOCKS_BUMP;
-			break;
-		case RLIMIT_SIGPENDING:
-			res_add += GR_RLIM_SIGPENDING_BUMP;
-			break;
-		case RLIMIT_MSGQUEUE:
-			res_add += GR_RLIM_MSGQUEUE_BUMP;
-			break;
-		case RLIMIT_NICE:
-			res_add += GR_RLIM_NICE_BUMP;
-			break;
-		case RLIMIT_RTPRIO:
-			res_add += GR_RLIM_RTPRIO_BUMP;
-			break;
-		case RLIMIT_RTTIME:
-			res_add += GR_RLIM_RTTIME_BUMP;
-			break;
-		}
+		res_add = wanted + res_learn_bumps[res];
 
 		acl->res[res].rlim_cur = res_add;
 
@@ -2182,7 +2200,7 @@ gr_learn_resource(const struct task_struct *task,
 		rcu_read_lock();
 		cred = __task_cred(task);
 		security_learn(GR_LEARN_AUDIT_MSG, task->role->rolename,
-			       task->role->roletype, cred->uid, cred->gid, acl->filename,
+			       task->role->roletype, GR_GLOBAL_UID(cred->uid), GR_GLOBAL_GID(cred->gid), acl->filename,
 			       acl->filename, acl->res[res].rlim_cur, acl->res[res].rlim_max,
 			       "", (unsigned long) res, &task->signal->saved_ip);
 		rcu_read_unlock();
@@ -2190,6 +2208,8 @@ gr_learn_resource(const struct task_struct *task,
 
 	return;
 }
+EXPORT_SYMBOL_GPL(gr_learn_resource);
+#endif
 
 #if defined(CONFIG_PAX_HAVE_ACL_FLAGS) && (defined(CONFIG_PAX_NOEXEC) || defined(CONFIG_PAX_ASLR))
 void
@@ -2234,173 +2254,6 @@ pax_set_initial_flags(struct linux_binprm *bprm)
 }
 #endif
 
-#ifdef CONFIG_SYSCTL
-/* Eric Biederman likes breaking userland ABI and every inode-based security
-   system to save 35kb of memory */
-
-/* we modify the passed in filename, but adjust it back before returning */
-static struct acl_object_label *gr_lookup_by_name(char *name, unsigned int len)
-{
-	struct name_entry *nmatch;
-	char *p, *lastp = NULL;
-	struct acl_object_label *obj = NULL, *tmp;
-	struct acl_subject_label *tmpsubj;
-	char c = '\0';
-
-	read_lock(&gr_inode_lock);
-
-	p = name + len - 1;
-	do {
-		nmatch = lookup_name_entry(name);
-		if (lastp != NULL)
-			*lastp = c;
-
-		if (nmatch == NULL)
-			goto next_component;
-		tmpsubj = current->acl;
-		do {
-			obj = lookup_acl_obj_label(nmatch->inode, nmatch->device, tmpsubj);
-			if (obj != NULL) {
-				tmp = obj->globbed;
-				while (tmp) {
-					if (!glob_match(tmp->filename, name)) {
-						obj = tmp;
-						goto found_obj;
-					}
-					tmp = tmp->next;
-				}
-				goto found_obj;
-			}
-		} while ((tmpsubj = tmpsubj->parent_subject));
-next_component:
-		/* end case */
-		if (p == name)
-			break;
-
-		while (*p != '/')
-			p--;
-		if (p == name)
-			lastp = p + 1;
-		else {
-			lastp = p;
-			p--;
-		}
-		c = *lastp;
-		*lastp = '\0';
-	} while (1);
-found_obj:
-	read_unlock(&gr_inode_lock);
-	/* obj returned will always be non-null */
-	return obj;
-}
-
-/* returns 0 when allowing, non-zero on error
-   op of 0 is used for readdir, so we don't log the names of hidden files
-*/
-__u32
-gr_handle_sysctl(const struct ctl_table *table, const int op)
-{
-	struct ctl_table *tmp;
-	const char *proc_sys = "/proc/sys";
-	char *path;
-	struct acl_object_label *obj;
-	unsigned short len = 0, pos = 0, depth = 0, i;
-	__u32 err = 0;
-	__u32 mode = 0;
-
-	if (unlikely(!(gr_status & GR_READY)))
-		return 0;
-
-	/* for now, ignore operations on non-sysctl entries if it's not a
-	   readdir*/
-	if (table->child != NULL && op != 0)
-		return 0;
-
-	mode |= GR_FIND;
-	/* it's only a read if it's an entry, read on dirs is for readdir */
-	if (op & MAY_READ)
-		mode |= GR_READ;
-	if (op & MAY_WRITE)
-		mode |= GR_WRITE;
-
-	preempt_disable();
-
-	path = per_cpu_ptr(gr_shared_page[0], smp_processor_id());
-
-	/* it's only a read/write if it's an actual entry, not a dir
-	   (which are opened for readdir)
-	*/
-
-	/* convert the requested sysctl entry into a pathname */
-
-	for (tmp = (struct ctl_table *)table; tmp != NULL; tmp = tmp->parent) {
-		len += strlen(tmp->procname);
-		len++;
-		depth++;
-	}
-
-	if ((len + depth + strlen(proc_sys) + 1) > PAGE_SIZE) {
-		/* deny */
-		goto out;
-	}
-
-	memset(path, 0, PAGE_SIZE);
-
-	memcpy(path, proc_sys, strlen(proc_sys));
-
-	pos += strlen(proc_sys);
-
-	for (; depth > 0; depth--) {
-		path[pos] = '/';
-		pos++;
-		for (i = 1, tmp = (struct ctl_table *)table; tmp != NULL; tmp = tmp->parent) {
-			if (depth == i) {
-				memcpy(path + pos, tmp->procname,
-				       strlen(tmp->procname));
-				pos += strlen(tmp->procname);
-			}
-			i++;
-		}
-	}
-
-	obj = gr_lookup_by_name(path, pos);
-	err = obj->mode & (mode | to_gr_audit(mode) | GR_SUPPRESS);
-
-	if (unlikely((current->acl->mode & (GR_LEARN | GR_INHERITLEARN)) &&
-		     ((err & mode) != mode))) {
-		__u32 new_mode = mode;
-
-		new_mode &= ~(GR_AUDITS | GR_SUPPRESS);
-
-		err = 0;
-		gr_log_learn_sysctl(path, new_mode);
-	} else if (!(err & GR_FIND) && !(err & GR_SUPPRESS) && op != 0) {
-		gr_log_hidden_sysctl(GR_DONT_AUDIT, GR_HIDDEN_ACL_MSG, path);
-		err = -ENOENT;
-	} else if (!(err & GR_FIND)) {
-		err = -ENOENT;
-	} else if (((err & mode) & ~GR_FIND) != (mode & ~GR_FIND) && !(err & GR_SUPPRESS)) {
-		gr_log_str4(GR_DONT_AUDIT, GR_SYSCTL_ACL_MSG, "denied",
-			       path, (mode & GR_READ) ? " reading" : "",
-			       (mode & GR_WRITE) ? " writing" : "");
-		err = -EACCES;
-	} else if ((err & mode) != mode) {
-		err = -EACCES;
-	} else if ((((err & mode) & ~GR_FIND) == (mode & ~GR_FIND)) && (err & GR_AUDITS)) {
-		gr_log_str4(GR_DO_AUDIT, GR_SYSCTL_ACL_MSG, "successful",
-			       path, (mode & GR_READ) ? " reading" : "",
-			       (mode & GR_WRITE) ? " writing" : "");
-		err = 0;
-	} else
-		err = 0;
-
-      out:
-	preempt_enable();
-
-	return err;
-}
-#endif
-
 int
 gr_handle_proc_ptrace(struct task_struct *task)
 {
@@ -2418,13 +2271,13 @@ gr_handle_proc_ptrace(struct task_struct *task)
 	read_lock(&grsec_exec_file_lock);
 	filp = task->exec_file;
 
-	while (tmp->pid > 0) {
+	while (task_pid_nr(tmp) > 0) {
 		if (tmp == curtemp)
 			break;
 		tmp = tmp->real_parent;
 	}
 
-	if (!filp || (tmp->pid == 0 && ((grsec_enable_harden_ptrace && current_uid() && !(gr_status & GR_READY)) ||
+	if (!filp || (task_pid_nr(tmp) == 0 && ((grsec_enable_harden_ptrace && gr_is_global_nonroot(current_uid()) && !(gr_status & GR_READY)) ||
 				((gr_status & GR_READY)	&& !(current->acl->mode & GR_RELAXPTRACE))))) {
 		read_unlock(&grsec_exec_file_lock);
 		read_unlock(&tasklist_lock);
@@ -2448,7 +2301,7 @@ gr_handle_proc_ptrace(struct task_struct *task)
 
 	if (!(current->acl->mode & GR_POVERRIDE) && !(current->role->roletype & GR_ROLE_GOD)
 	    && (current->acl != task->acl || (current->acl != current->role->root_label
-	    && current->pid != task->pid)))
+	    && task_pid_nr(current) != task_pid_nr(task))))
 		return 1;
 
 	return 0;
@@ -2480,13 +2333,13 @@ gr_handle_ptrace(struct task_struct *task, const long request)
 #endif
 	if (request == PTRACE_ATTACH || request == PTRACE_SEIZE) {
 		read_lock(&tasklist_lock);
-		while (tmp->pid > 0) {
+		while (task_pid_nr(tmp) > 0) {
 			if (tmp == curtemp)
 				break;
 			tmp = tmp->real_parent;
 		}
 
-		if (tmp->pid == 0 && ((grsec_enable_harden_ptrace && current_uid() && !(gr_status & GR_READY)) ||
+		if (task_pid_nr(tmp) == 0 && ((grsec_enable_harden_ptrace && gr_is_global_nonroot(current_uid()) && !(gr_status & GR_READY)) ||
 					((gr_status & GR_READY)	&& !(current->acl->mode & GR_RELAXPTRACE)))) {
 			read_unlock(&tasklist_lock);
 			gr_log_ptrace(GR_DONT_AUDIT, GR_PTRACE_ACL_MSG, task);
@@ -2651,7 +2504,7 @@ gr_acl_handle_psacct(struct task_struct *task, const long code)
 	runtime -= wmin * 60;
 	wsec = runtime;
 
-	task_times(task, &utime, &stime);
+	task_cputime(task, &utime, &stime);
 	cputime = cputime_to_secs(utime + stime);
 	cday = cputime / (60 * 60 * 24);
 	cputime -= cday * (60 * 60 * 24);
@@ -2690,10 +2543,10 @@ int gr_is_taskstats_denied(int pid)
 #if defined(CONFIG_GRKERNSEC_PROC_USER) || defined(CONFIG_GRKERNSEC_PROC_USERGROUP)
 		cred = __task_cred(task);
 #ifdef CONFIG_GRKERNSEC_PROC_USER
-		if (cred->uid != 0)
+		if (gr_is_global_nonroot(cred->uid))
 			ret = -EACCES;
 #elif defined(CONFIG_GRKERNSEC_PROC_USERGROUP)
-		if (cred->uid != 0 && !groups_search(cred->group_info, grsec_proc_gid))
+		if (gr_is_global_nonroot(cred->uid) && !groups_search(cred->group_info, grsec_proc_gid))
 			ret = -EACCES;
 #endif
 #endif
@@ -2819,7 +2672,6 @@ void gr_put_exec_file(struct task_struct *task)
 #ifdef CONFIG_NETFILTER_XT_MATCH_GRADM_MODULE
 EXPORT_SYMBOL_GPL(gr_acl_is_enabled);
 #endif
-EXPORT_SYMBOL_GPL(gr_learn_resource);
 #ifdef CONFIG_SECURITY
 EXPORT_SYMBOL_GPL(gr_check_user_change);
 EXPORT_SYMBOL_GPL(gr_check_group_change);

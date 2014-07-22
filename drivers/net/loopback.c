@@ -39,9 +39,7 @@
 #include <linux/errno.h>
 #include <linux/fcntl.h>
 #include <linux/in.h>
-#include <linux/init.h>
 
-#include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
@@ -113,10 +111,10 @@ static struct rtnl_link_stats64 *loopback_get_stats64(struct net_device *dev,
 
 		lb_stats = per_cpu_ptr(dev->lstats, i);
 		do {
-			start = u64_stats_fetch_begin(&lb_stats->syncp);
+			start = u64_stats_fetch_begin_bh(&lb_stats->syncp);
 			tbytes = lb_stats->bytes;
 			tpackets = lb_stats->packets;
-		} while (u64_stats_fetch_retry(&lb_stats->syncp, start));
+		} while (u64_stats_fetch_retry_bh(&lb_stats->syncp, start));
 		bytes   += tbytes;
 		packets += tpackets;
 	}
@@ -138,15 +136,22 @@ static const struct ethtool_ops loopback_ethtool_ops = {
 
 static int loopback_dev_init(struct net_device *dev)
 {
+	int i;
 	dev->lstats = alloc_percpu(struct pcpu_lstats);
 	if (!dev->lstats)
 		return -ENOMEM;
 
+	for_each_possible_cpu(i) {
+		struct pcpu_lstats *lb_stats;
+		lb_stats = per_cpu_ptr(dev->lstats, i);
+		u64_stats_init(&lb_stats->syncp);
+	}
 	return 0;
 }
 
 static void loopback_dev_free(struct net_device *dev)
 {
+	dev_net(dev)->loopback_dev = NULL;
 	free_percpu(dev->lstats);
 	free_netdev(dev);
 }
@@ -163,7 +168,7 @@ static const struct net_device_ops loopback_ops = {
  */
 static void loopback_setup(struct net_device *dev)
 {
-	dev->mtu		= (16 * 1024) + 20 + 20 + 12;
+	dev->mtu		= 64 * 1024;
 	dev->hard_header_len	= ETH_HLEN;	/* 14	*/
 	dev->addr_len		= ETH_ALEN;	/* 6	*/
 	dev->tx_queue_len	= 0;
@@ -174,7 +179,7 @@ static void loopback_setup(struct net_device *dev)
 	dev->features 		= NETIF_F_SG | NETIF_F_FRAGLIST
 		| NETIF_F_ALL_TSO
 		| NETIF_F_UFO
-		| NETIF_F_NO_CSUM
+		| NETIF_F_HW_CSUM
 		| NETIF_F_RXCSUM
 		| NETIF_F_HIGHDMA
 		| NETIF_F_LLTX
@@ -203,6 +208,7 @@ static __net_init int loopback_net_init(struct net *net)
 	if (err)
 		goto out_free_netdev;
 
+	BUG_ON(dev->ifindex != LOOPBACK_IFINDEX);
 	net->loopback_dev = dev;
 	return 0;
 
@@ -216,6 +222,6 @@ out:
 }
 
 /* Registered in net/core/dev.c */
-struct pernet_operations __net_initconst loopback_net_ops = {
+struct pernet_operations __net_initdata loopback_net_ops = {
        .init = loopback_net_init,
 };
