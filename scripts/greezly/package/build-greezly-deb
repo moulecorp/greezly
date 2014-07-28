@@ -260,7 +260,7 @@ EOF
 chmod +x "$imgdir/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh"
 
 cp $KBUILD_IMAGE "$imgdir/boot/vmlinuz-$kv-grsec-amd64"
-if [[ $(grep -q '^CONFIG_MODULES=y' $KCONFIG_CONFIG) ]]; then
+if $(grep -q '^CONFIG_MODULES=y' $KCONFIG_CONFIG); then
 	make modules_install INSTALL_MOD_PATH="$imgdir" KBUILD_SRC=
 	rm -f "$imgdir/lib/modules/$kv-grsec-amd64/build"
 	rm -f "$imgdir/lib/modules/$kv-grsec-amd64/source"
