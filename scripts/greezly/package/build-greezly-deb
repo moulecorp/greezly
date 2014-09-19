@@ -6,10 +6,15 @@ if [ $(id -u) -ne 0 ]; then
 fi
 
 pv=$(git tag --points-at HEAD | grep -o '[0-9]*')
-urg=$URGENCY
 OUT_OF_TREE=0
 
-if [[ -z "$pv" || -z "$urg" ]]; then
+urg=$URGENCY
+if [[ -z "$urg" ]]; then
+	urg="low"
+fi
+
+if [[ -z "$pv" ]]; then
+	pv=$KERNELRELEASE
 	OUT_OF_TREE=1
 elif [[ $pv -gt 1 ]]; then
 	pv_p=$(expr $pv - 1)
@@ -53,17 +58,6 @@ mkdir -m 755 -p "$meta_hdir/usr/share/doc/linux-headers-grsec-amd64"
 mkdir -m 755 -p "$meta_hdir/DEBIAN"
 mkdir -m 755 -p "$meta_srcdir/usr/share/doc/linux-source-grsec"
 mkdir -m 755 -p "$meta_srcdir/DEBIAN"
-
-if [[ $OUT_OF_TREE -eq 0 ]]; then
-	export KBUILD_BUILD_VERSION=$pv
-	# Do not append '+' to the kernel version
-	export LOCALVERSION=""
-else
-	pv=$KERNELRELEASE
-	urg="low"
-fi
-export KBUILD_BUILD_USER="marvin"
-export KBUILD_BUILD_HOST="Heart_of_Gold"
 
 mk_pkg () {
 	local pkg_name=$1 pkg_dir=$2

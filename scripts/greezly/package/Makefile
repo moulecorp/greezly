@@ -1,5 +1,15 @@
 # Makefile for greezly targets
 
+GR_PV := $(shell git tag --points-at HEAD | grep -o '[0-9]*')
+
+export KBUILD_BUILD_USER = marvin
+export KBUILD_BUILD_HOST = Heart_of_Gold
+
+ifneq ($(GR_PV),)
+	export KBUILD_BUILD_VERSION := $(GR_PV)
+	export LOCALVERSION =
+endif
+
 cmd_check_fakeroot = set -e;						\
 		     test `id -u` = 0					\
 		     || test -n "$(ROOTCMD)"				\
