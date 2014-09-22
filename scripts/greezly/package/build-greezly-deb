@@ -26,11 +26,7 @@ if [ -z "$MAINTAINER" ]; then
 	MAINTAINER="Anonymous <$(id -nu)@$(hostname -f)>"
 fi
 
-
 kv=$(make kernelversion)
-if [ ! -e ".config" ]; then
-	make x86_64_greezly_defconfig
-fi
 
 workdir="$objtree/debian/tmp"
 imgdir="$workdir/img"
