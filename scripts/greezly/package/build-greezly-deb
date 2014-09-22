@@ -5,16 +5,18 @@ if [ $(id -u) -ne 0 ]; then
 	exit -1
 fi
 
+urg=$URGENCY
 pv=$(git tag --points-at HEAD | grep -o '[0-9]*')
+kv=$(make kernelversion)
+krelease=$(make kernelrelease)
 OUT_OF_TREE=0
 
-urg=$URGENCY
 if [[ -z "$urg" ]]; then
 	urg="low"
 fi
 
 if [[ -z "$pv" ]]; then
-	pv=$KERNELRELEASE
+	pv=$krelease
 	OUT_OF_TREE=1
 elif [[ $pv -gt 1 ]]; then
 	pv_p=$(expr $pv - 1)
@@ -26,8 +28,6 @@ if [ -z "$MAINTAINER" ]; then
 	MAINTAINER="Anonymous <$(id -nu)@$(hostname -f)>"
 fi
 
-kv=$(make kernelversion)
-
 workdir="$objtree/debian/tmp"
 imgdir="$workdir/img"
 hdir="$workdir/headers"
@@ -38,12 +38,12 @@ meta_srcdir="$workdir/meta_src"
 
 mkdir -m 755 -p "$workdir"
 mkdir -m 755 -p "$imgdir/boot"
-mkdir -m 755 -p "$imgdir/usr/share/doc/linux-image-$kv-grsec-amd64"
-mkdir -m 755 -p "$imgdir/usr/share/linux-image-$kv-grsec-amd64"
-mkdir -m 755 -p "$imgdir/lib/modules/$kv-grsec-amd64"
+mkdir -m 755 -p "$imgdir/usr/share/doc/linux-image-$krelease"
+mkdir -m 755 -p "$imgdir/usr/share/linux-image-$krelease"
+mkdir -m 755 -p "$imgdir/lib/modules/$krelease"
 mkdir -m 755 -p "$imgdir/DEBIAN"
-mkdir -m 755 -p "$hdir/usr/share/doc/linux-headers-$kv-grsec-amd64"
-mkdir -m 755 -p "$hdir/usr/src/linux-headers-$kv-grsec-amd64"
+mkdir -m 755 -p "$hdir/usr/share/doc/linux-headers-$krelease"
+mkdir -m 755 -p "$hdir/usr/src/linux-headers-$krelease"
 mkdir -m 755 -p "$hdir/DEBIAN"
 mkdir -m 755 -p "$srcdir/usr/src"
 mkdir -m 755 -p "$srcdir/usr/share/doc/linux-source-$kv-grsec"
@@ -92,7 +92,7 @@ for script in postinst postrm preinst prerm; do
 #!/bin/bash
 set -e
 export DEB_MAINT_PARAMS="\$*"
-test -d /etc/kernel/$script.d && run-parts --arg="$kv-grsec-amd64" \
+test -d /etc/kernel/$script.d && run-parts --arg="$krelease" \
 		/etc/kernel/$script.d
 EOF
 	if [[ $script == "postinst" ]]; then
@@ -116,7 +116,7 @@ echo ""
 echo "WARNING: some programs need PaX flags to be set in order to work"
 echo "on this grsec kernel. Like grub2."
 echo "You can set the required flags by running:"
-echo "/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh"
+echo "/usr/share/linux-image-$krelease/set_pax_flags.sh"
 echo ""
 
 if [ -d /etc/sysctl.d ]; then
@@ -156,7 +156,7 @@ maintainer: $MAINTAINER
 Standards-version: 3.9.2
 Homepage: http://mirrors.n0.pe
 
-Package: linux-image-$kv-grsec-amd64
+Package: linux-image-$krelease
 Section: kernel
 Provides: linux-image, linux-image-2.6, linux-modules-$kv
 Suggests: gradm, paxctl
@@ -170,7 +170,7 @@ Description: Linux kernel binary image patched with grsecurity
  Support for virtualization (Xen, KVM) as host and guest is included.
  Dynamic Kernel Module Support is present.
 
-Package: linux-headers-$kv-grsec-amd64
+Package: linux-headers-$krelease
 Section: kernel
 Provides: linux-headers
 Architecture: all
@@ -190,7 +190,7 @@ Description: Linux kernel source for version $kv, patched with grsecurity
 
 Package: linux-image-grsec-amd64
 Section: kernel
-Depends: linux-image-$kv-grsec-amd64
+Depends: linux-image-$krelease
 Architecture: amd64
 Description: Linux kernel for 64 bit arch patched with grsecurity (meta-package)
   This package depends on the latest Linux kernel and grsecurity patch available
@@ -204,7 +204,7 @@ Description: Linux kernel for 64 bit arch patched with grsecurity (meta-package)
 
 Package: linux-headers-grsec-amd64
 Section: kernel
-Depends: linux-headers-$kv-grsec-amd64
+Depends: linux-headers-$krelease
 Architecture: amd64
 Description: Header files for linux patched with grsec (meta-package)
   Provides the latest linux-grsec headers, generally used for building
@@ -220,7 +220,7 @@ Description: Latest linux kernel source, patched with grsecurity (meta-package)
   Can be used to build your own kernel and to review the kernel we provide.
 EOF
 
-cat <<EOF > $imgdir/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh
+cat <<EOF > $imgdir/usr/share/linux-image-$krelease/set_pax_flags.sh
 #!/bin/bash
 set_pax_flags () {
 	if [ -f \$2 ]; then
@@ -247,20 +247,20 @@ set_pax_flags "m"  "/usr/sbin/slapd"
 set_pax_flags "p"  "/usr/sbin/grub-mkdevicemap"
 exit 0
 EOF
-chmod +x "$imgdir/usr/share/linux-image-$kv-grsec-amd64/set_pax_flags.sh"
+chmod +x "$imgdir/usr/share/linux-image-$krelease/set_pax_flags.sh"
 
-cp $KBUILD_IMAGE "$imgdir/boot/vmlinuz-$kv-grsec-amd64"
+cp $KBUILD_IMAGE "$imgdir/boot/vmlinuz-$krelease"
 if $(grep -q '^CONFIG_MODULES=y' $KCONFIG_CONFIG); then
 	make modules_install INSTALL_MOD_PATH="$imgdir" KBUILD_SRC=
-	rm -f "$imgdir/lib/modules/$kv-grsec-amd64/build"
-	rm -f "$imgdir/lib/modules/$kv-grsec-amd64/source"
+	rm -f "$imgdir/lib/modules/$krelease/build"
+	rm -f "$imgdir/lib/modules/$krelease/source"
 fi
-mk_pkg "linux-image-$kv-grsec-amd64" "$imgdir"
+mk_pkg "linux-image-$krelease" "$imgdir"
 
 make headers_check
 make headers_install \
-	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$kv-grsec-amd64"
-mk_pkg "linux-headers-$kv-grsec-amd64" "$hdir"
+	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$krelease"
+mk_pkg "linux-headers-$krelease" "$hdir"
 
 git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
 bzip2 -9 "$srcdir/usr/src/linux-source-$kv-grsec.tar"
