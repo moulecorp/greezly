@@ -266,9 +266,11 @@ git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
 bzip2 -9 "$srcdir/usr/src/linux-source-$kv-grsec.tar"
 mk_pkg "linux-source-$kv-grsec" "$srcdir"
 
-mk_pkg "linux-image-grsec-amd64" "$meta_imgdir"
-mk_pkg "linux-headers-grsec-amd64" "$meta_hdir"
-mk_pkg "linux-source-grsec" "$meta_srcdir"
+if [[ $OUT_OF_TREE -eq 0 ]]; then
+	mk_pkg "linux-image-grsec-amd64" "$meta_imgdir"
+	mk_pkg "linux-headers-grsec-amd64" "$meta_hdir"
+	mk_pkg "linux-source-grsec" "$meta_srcdir"
+fi
 
 rm -r "$workdir"
 
