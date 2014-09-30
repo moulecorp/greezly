@@ -10,21 +10,25 @@ ifneq ($(GR_PV),)
 	export LOCALVERSION =
 endif
 
-cmd_check_fakeroot = set -e;						\
-		     test `id -u` = 0					\
-		     || test -n "$(ROOTCMD)"				\
-		     || {						\
-			 echo;						\
-		         echo "Must be run as root or using fakeroot.";	\
-			 echo;						\
-			 false;						\
-		        }
+quiet_cmd_builddeb = BUILDDEB
+      cmd_builddeb =						\
+	set -e;							\
+	test `id -u` = 0					\
+	|| test -n "$(ROOTCMD)"					\
+	|| {							\
+		which fakeroot > /dev/null 2>&1			\
+		&& ROOTCMD="fakeroot -u";			\
+	} || {							\
+		echo;						\
+		echo "Error: install fakeroot or set ROOTCMD";	\
+		echo;						\
+		false;						\
+	} && $$ROOTCMD $(CONFIG_SHELL)				\
+		$(srctree)/scripts/greezly/package/build-greezly-deb
 
 greezly-deb: FORCE
-	$(call cmd,check_fakeroot)
 	$(MAKE) KBUILD_SRC=
-	$(ROOTCMD) $(CONFIG_SHELL)	\
-		$(srctree)/scripts/greezly/package/build-greezly-deb
+	$(call cmd,builddeb)
 
 help: FORCE
 	@echo '  greezly-deb         - Build greezly .deb packages'
