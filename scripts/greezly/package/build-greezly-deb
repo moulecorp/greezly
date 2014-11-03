@@ -69,7 +69,7 @@ mk_pkg () {
 	chown -R root:root "$pkg_dir"
 	chmod -R go-w "$pkg_dir"
 
-	dpkg-gencontrol -isp -p$pkg_name -P"$pkg_dir"
+	dpkg-gencontrol -p$pkg_name -P"$pkg_dir"
 	dpkg --build "$pkg_dir" ..
 }
 
