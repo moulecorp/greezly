@@ -140,7 +140,7 @@ fi
 EOF
 	elif [[ $script == "postrm" ]]; then
 		cat <<EOF >> $imgdir/DEBIAN/$script
-if [ \$(ls /boot | grep -c "grsec") -ne 0 ] && \
+if [ \$(ls /boot | grep -c "grsec") -eq 0 ] && \
 		[ -f /etc/sysctl.d/grsecurity.conf ]; then
 	rm -f /etc/sysctl.d/grsecurity.conf
 fi
