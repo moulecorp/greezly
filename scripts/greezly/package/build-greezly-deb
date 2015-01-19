@@ -154,7 +154,7 @@ Source: linux-grsec
 Priority: optional
 maintainer: $MAINTAINER
 Standards-version: 3.9.2
-Homepage: http://mirrors.n0.pe
+Homepage: http://greezly.moulecorp.org
 
 Package: linux-image-$krelease
 Section: kernel
