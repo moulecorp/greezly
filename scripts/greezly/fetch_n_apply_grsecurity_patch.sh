@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (C) 2014, Antoine Tenart <atenart@n0.pe>
+# Copyright (C) 2015, Moule Corp <greezly@moulecorp.org>
 
 gv=$1
 kv=$2

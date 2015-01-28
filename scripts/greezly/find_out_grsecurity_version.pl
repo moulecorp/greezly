@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# Copyright (C) 2014, Antoine Tenart <atenart@n0.pe>
+# Copyright (C) 2015, Moule Corp <greezly@moulecorp.org>
 
 use strict;
 use WWW::Mechanize;
