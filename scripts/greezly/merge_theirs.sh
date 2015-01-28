@@ -17,5 +17,5 @@ git checkout $from scripts/greezly arch/x86/configs/x86_64_greezly_defconfig
 
 ./scripts/greezly/keep_ours.sh $base $from $to
 
-git commit --amend --no-edit
+git commit -s --amend --no-edit
 git branch -D tmpMerge

@@ -13,7 +13,7 @@ clean() {
 
 commit() {
 	git add -A
-	git commit -m"Apply grsecurity patch $timestamp"
+	git commit -s -m"Apply grsecurity patch $timestamp"
 }
 
 cd $(git rev-parse --show-toplevel)
@@ -68,7 +68,7 @@ else
 fi
 
 ./scripts/greezly/keep_ours.sh $base $from greezly
-git commit --amend --no-edit
+git commit -s --amend --no-edit
 
 clean
 exit 0
