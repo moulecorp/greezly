@@ -263,6 +263,7 @@ make headers_install \
 mk_pkg "linux-headers-$krelease" "$hdir"
 
 git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
+tar rf "$srcdir/usr/src/linux-source-$kv-grsec.tar" .config
 bzip2 -9 "$srcdir/usr/src/linux-source-$kv-grsec.tar"
 mk_pkg "linux-source-$kv-grsec" "$srcdir"
 
