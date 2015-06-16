@@ -11,9 +11,28 @@ clean() {
 	rm ../grsecurity-$gv-$kv-$timestamp.patch.sig
 }
 
+make_commit_message() {
+	git log --pretty=format:"%b" --grep="Apply grsecurity patch" greezly |
+		sed '/Signed-off-by: Moule Corp <greezly@moulecorp.org>/d' |
+		sed -e :a -e '/./,$!d;/^\n*$/{$d;N;};/\n$/ba' >> last_changelog
+
+	if [ ! -f ../changelog-stable2.txt ]; then
+		wget https://grsecurity.net/changelog-stable2.txt -P .. ||
+			(echo "Error while downloading grsecurity changelog" && exit 1)
+	fi
+
+	echo -e "Apply grsecurity patch $timestamp\n" > commit_message
+	diff -U $(wc -l < last_changelog) last_changelog ../changelog-stable2.txt |
+		grep -v '^+++\|^---' | grep '^+' | sed 's/^+//g' >> commit_message
+
+	rm -f ../changelog-stable2.txt last_changelog
+}
+
 commit() {
 	git add -A
-	git commit -s -m"Apply grsecurity patch $timestamp"
+	make_commit_message
+	git commit -s -F commit_message
+	rm -f commit_message
 }
 
 cd $(git rev-parse --show-toplevel)
