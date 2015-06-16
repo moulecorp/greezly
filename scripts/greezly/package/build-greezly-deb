@@ -262,6 +262,7 @@ make headers_check
 make headers_install \
 	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$krelease"
 ln -s "/usr/src/linux-headers-$krelease" "$hdir/lib/modules/$krelease/build"
+cp .config "$hdir/usr/src/linux-headers-$krelease/.config"
 mk_pkg "linux-headers-$krelease" "$hdir"
 
 git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
