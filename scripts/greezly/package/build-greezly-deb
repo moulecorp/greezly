@@ -44,6 +44,7 @@ mkdir -m 755 -p "$imgdir/lib/modules/$krelease"
 mkdir -m 755 -p "$imgdir/DEBIAN"
 mkdir -m 755 -p "$hdir/usr/share/doc/linux-headers-$krelease"
 mkdir -m 755 -p "$hdir/usr/src/linux-headers-$krelease"
+mkdir -m 755 -p "$hdir/lib/modules/$krelease"
 mkdir -m 755 -p "$hdir/DEBIAN"
 mkdir -m 755 -p "$srcdir/usr/src"
 mkdir -m 755 -p "$srcdir/usr/share/doc/linux-source-$kv-grsec"
@@ -260,6 +261,7 @@ mk_pkg "linux-image-$krelease" "$imgdir"
 make headers_check
 make headers_install \
 	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$krelease"
+ln -s "/usr/src/linux-headers-$krelease" "$hdir/lib/modules/$krelease/build"
 mk_pkg "linux-headers-$krelease" "$hdir"
 
 git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
