@@ -258,8 +258,8 @@ if $(grep -q '^CONFIG_MODULES=y' $KCONFIG_CONFIG); then
 fi
 mk_pkg "linux-image-$krelease" "$imgdir"
 
-make headers_check
-make headers_install \
+make headers_check KBUILD_SRC=
+make headers_install KBUILD_SRC= \
 	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$krelease"
 ln -s "/usr/src/linux-headers-$krelease" "$hdir/lib/modules/$krelease/build"
 cp .config "$hdir/usr/src/linux-headers-$krelease/.config"
