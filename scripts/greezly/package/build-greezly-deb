@@ -259,10 +259,15 @@ fi
 mk_pkg "linux-image-$krelease" "$imgdir"
 
 make headers_check KBUILD_SRC=
-make headers_install KBUILD_SRC= \
-	INSTALL_HDR_PATH="$hdir/usr/src/linux-headers-$krelease"
 ln -s "/usr/src/linux-headers-$krelease" "$hdir/lib/modules/$krelease/build"
 cp .config "$hdir/usr/src/linux-headers-$krelease/.config"
+find . -name Makefile\* -o -name Kconfig\* -o -name \*.pl > hdsrcfiles
+find arch/x86/include include scripts -type f >> hdsrcfiles
+find arch/x86/include Module.symvers include scripts -type f > hdobjfiles
+find tools/gcc -name \*.so >> hdobjfiles
+tar -c -f - -T hdsrcfiles | (cd "$hdir/usr/src/linux-headers-$krelease"; tar -xf -)
+tar -c -f - -T hdobjfiles | (cd "$hdir/usr/src/linux-headers-$krelease"; tar -xf -)
+rm hdsrcfiles hdobjfiles
 mk_pkg "linux-headers-$krelease" "$hdir"
 
 git archive --format=tar HEAD > "$srcdir/usr/src/linux-source-$kv-grsec.tar"
