@@ -18,6 +18,8 @@ commit() {
 
 cd $(git rev-parse --show-toplevel)
 
+git fetch stable
+
 if [ ! -f ../grsecurity-$gv-$kv-$timestamp.patch ]; then
 	wget https://grsecurity.net/stable/grsecurity-$gv-$kv-$timestamp.patch -P .. ||
 		(echo "Error while downloading the patch" && exit -1)
