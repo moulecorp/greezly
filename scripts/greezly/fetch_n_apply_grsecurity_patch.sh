@@ -18,6 +18,11 @@ commit() {
 
 cd $(git rev-parse --show-toplevel)
 
+if [ $(git --no-pager log --pretty=tformat:"%h" --grep="Apply grsecurity patch $timestamp" greezly | wc -l) -ge 1 ]; then
+	echo "Abort: grsecurity patch $timestamp already applied."
+	exit 0
+fi
+
 git fetch stable
 
 if [ ! -f ../grsecurity-$gv-$kv-$timestamp.patch ]; then
