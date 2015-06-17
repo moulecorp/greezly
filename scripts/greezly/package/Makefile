@@ -30,6 +30,9 @@ greezly-deb: FORCE
 	$(MAKE) KBUILD_SRC=
 	$(call cmd,builddeb)
 
+greezly-pull: FORCE
+	$(Q) $(srctree)/scripts/greezly/pull.sh
+
 greezly-verify: FORCE
 	$(Q) $(srctree)/scripts/greezly/verify.sh
 
