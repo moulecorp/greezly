@@ -1255,6 +1255,8 @@ help:
 	@echo  '  kernelrelease	  - Output the release version string'
 	@echo  '  kernelversion	  - Output the version stored in Makefile'
 	@echo  '  image_name	  - Output the image name'
+	@echo  '  greezly-pull    - Download the latest grsecurity patch and apply it'
+	@echo  '  greezly-verify  - Verify our tree against the upstream grsecurity patch'
 	@echo  '  headers_install - Install sanitised kernel headers to INSTALL_HDR_PATH'; \
 	 echo  '                    (default: $(INSTALL_HDR_PATH))'; \
 	 echo  ''
