@@ -7,8 +7,8 @@ kv=$2
 timestamp=$3
 
 clean() {
-	rm ../grsecurity-$gv-$kv-$timestamp.patch
-	rm ../grsecurity-$gv-$kv-$timestamp.patch.sig
+	rm -f ../grsecurity-$gv-$kv-$timestamp.patch
+	rm -f ../grsecurity-$gv-$kv-$timestamp.patch.sig
 }
 
 make_commit_message() {
