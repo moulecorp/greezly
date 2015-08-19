@@ -160,7 +160,8 @@ Homepage: http://greezly.moulecorp.org
 Package: linux-image-$krelease
 Section: kernel
 Provides: linux-image, linux-image-2.6, linux-modules-$kv
-Suggests: gradm, paxctl
+Suggests: gradm
+Depends: irqbalance, paxctl
 Architecture: amd64
 Description: Linux kernel binary image patched with grsecurity
  Linux kernel image, version $kv.
